@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p release
-          npx pkg dist/cli.js --targets "${{ matrix.target }}" --output release/arena
+          npx @yao-pkg/pkg dist/cli.js --targets "${{ matrix.target }}" --output release/arena
           tar -C release -czf "release/${{ matrix.archive }}" arena
 
       - name: Package binary (Windows)
@@ -81,7 +81,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          npx pkg dist/cli.js --targets "${{ matrix.target }}" --output release/arena.exe
+          npx @yao-pkg/pkg dist/cli.js --targets "${{ matrix.target }}" --output release/arena.exe
           Compress-Archive -Path release/arena.exe -DestinationPath "release/${{ matrix.archive }}"
 
       - name: Upload artifact
