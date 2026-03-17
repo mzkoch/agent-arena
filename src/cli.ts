@@ -16,7 +16,6 @@ import { hasActiveAgents } from './tui/state';
 import {
   ensureSessionFile,
   initializeArena,
-  isArenaInitialized,
   loadRuntimeContext,
   removeSessionFile
 } from './cli/runtime';
@@ -78,43 +77,44 @@ program
 
 program
   .command('init')
-  .option('--config <path>', 'Path to arena.json')
-  .option('--requirements <path>', 'Path to requirements markdown')
-  .action(async (options: { config?: string; requirements?: string }) => {
+  .argument('[name]', 'Arena name (default: "default")')
+  .option('--config <path>', 'Path to arena.json to copy into .arena/<name>/')
+  .option('--requirements <path>', 'Path to requirements.md to copy into .arena/<name>/')
+  .action(async (name: string | undefined, options: { config?: string; requirements?: string }) => {
     const logger = createLogger(Boolean(program.opts().verbose));
+    const gitRoot = await findGitRoot();
 
-    if (!options.config || !options.requirements) {
+    const hasBothSources = Boolean(options.config) && Boolean(options.requirements);
+    const hasEitherSource = Boolean(options.config) || Boolean(options.requirements);
+
+    if (hasEitherSource && !hasBothSources) {
       throw new Error(
-        'Both --config and --requirements are required for "arena init".\n' +
-        'Usage: arena init --config arena.json --requirements requirements.md'
+        'Both --config and --requirements must be provided together, or omit both to scaffold a new arena.'
       );
     }
 
-    const gitRoot = await findGitRoot();
-    const context = await initializeArena(gitRoot, options.config, options.requirements, logger);
+    const context = await initializeArena(
+      gitRoot,
+      {
+        configSource: options.config,
+        requirementsSource: options.requirements,
+        arenaName: name
+      },
+      logger
+    );
+
     process.stdout.write(
-      `Initialized arena at ${context.paths.arenaDir} with ${context.workspaces.length} worktrees.\n`
+      `Initialized arena "${context.paths.arenaName}" at ${context.paths.arenaDir} with ${context.workspaces.length} worktrees.\n`
     );
   });
 
 program
   .command('launch')
-  .option('--config <path>', 'Path to arena.json (default: .arena/arena.json)')
-  .option('--requirements <path>', 'Path to requirements markdown')
+  .argument('[name]', 'Arena name')
   .option('--headless', 'Run without local TUI')
-  .action(async (options: { config?: string; requirements?: string; headless?: boolean }) => {
+  .action(async (name: string | undefined, options: { headless?: boolean }) => {
     const logger = createLogger(Boolean(program.opts().verbose));
-    const context = await loadRuntimeContext(options.config, options.requirements, logger);
-
-    if (!(await isArenaInitialized(context.paths))) {
-      if (!options.config || !options.requirements) {
-        throw new Error(
-          'Arena not initialized. Run "arena init --config arena.json --requirements requirements.md" first.'
-        );
-      }
-      const gitRoot = await findGitRoot();
-      Object.assign(context, await initializeArena(gitRoot, options.config, options.requirements, logger));
-    }
+    const context = await loadRuntimeContext(name, logger);
 
     const orchestrator = new ArenaOrchestrator(
       context.config,
@@ -195,11 +195,10 @@ program
 
 program
   .command('monitor')
-  .option('--config <path>', 'Path to arena.json (default: .arena/arena.json)')
-  .option('--requirements <path>', 'Path to requirements markdown')
-  .action(async (options: { config?: string; requirements?: string }) => {
+  .argument('[name]', 'Arena name')
+  .action(async (name: string | undefined) => {
     const logger = createLogger(Boolean(program.opts().verbose));
-    const context = await loadRuntimeContext(options.config, options.requirements, logger);
+    const context = await loadRuntimeContext(name, logger);
     const session = await readSessionFile(context.paths.sessionFilePath);
     const client = new ArenaIpcClient();
     const snapshotMessage = await client.connect(session.port);
@@ -211,11 +210,10 @@ program
 
 program
   .command('status')
-  .option('--config <path>', 'Path to arena.json (default: .arena/arena.json)')
-  .option('--requirements <path>', 'Path to requirements markdown')
-  .action(async (options: { config?: string; requirements?: string }) => {
+  .argument('[name]', 'Arena name')
+  .action(async (name: string | undefined) => {
     const logger = createLogger(Boolean(program.opts().verbose));
-    const context = await loadRuntimeContext(options.config, options.requirements, logger);
+    const context = await loadRuntimeContext(name, logger);
 
     if (await fileExists(context.paths.sessionFilePath)) {
       const session = await readSessionFile(context.paths.sessionFilePath);
@@ -249,11 +247,10 @@ program
 
 program
   .command('evaluate')
-  .option('--config <path>', 'Path to arena.json (default: .arena/arena.json)')
-  .option('--requirements <path>', 'Path to requirements markdown')
-  .action(async (options: { config?: string; requirements?: string }) => {
+  .argument('[name]', 'Arena name')
+  .action(async (name: string | undefined) => {
     const logger = createLogger(Boolean(program.opts().verbose));
-    const context = await loadRuntimeContext(options.config, options.requirements, logger);
+    const context = await loadRuntimeContext(name, logger);
     const report = await evaluateWorkspaces(context.paths.gitRoot, context.workspaces);
     const reportPath = await writeComparisonReport(context.paths.reportPath, report);
     process.stdout.write(`${reportPath}\n`);
@@ -261,20 +258,20 @@ program
 
 program
   .command('clean')
-  .option('--keep-config', 'Keep .arena/arena.json and .arena/requirements.md')
-  .action(async (options: { keepConfig?: boolean }) => {
+  .argument('[name]', 'Arena name')
+  .option('--keep-config', 'Keep arena.json and requirements.md')
+  .action(async (name: string | undefined, options: { keepConfig?: boolean }) => {
     const logger = createLogger(Boolean(program.opts().verbose));
-    const gitRoot = await findGitRoot();
-    const context = await loadRuntimeContext(undefined, undefined, logger);
+    const context = await loadRuntimeContext(name, logger);
 
     const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
     const branches = context.config.variants.map((v) => v.branch);
-    await repository.clean(gitRoot, branches);
+    await repository.clean(context.paths.gitRoot, branches);
     await removeSessionFile(context.paths.sessionFilePath);
 
     if (!options.keepConfig) {
       await rm(context.paths.arenaDir, { recursive: true, force: true });
-      process.stdout.write(`Cleaned arena at ${context.paths.arenaDir}.\n`);
+      process.stdout.write(`Cleaned arena "${context.paths.arenaName}" at ${context.paths.arenaDir}.\n`);
     } else {
       process.stdout.write(`Cleaned arena worktrees and branches (kept config).\n`);
     }

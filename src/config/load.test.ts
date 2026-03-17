@@ -1,10 +1,10 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { discoverArenaConfig, findGitRoot, loadArenaConfig, resolveArenaPaths } from './load';
+import { discoverArenaConfig, findGitRoot, listArenaNames, loadArenaConfig, resolveArenaName, resolveArenaPaths } from './load';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +31,7 @@ describe('loadArenaConfig', () => {
     expect(config.agentTimeoutMs).toBe(3_600_000);
     expect(config.variants[0]).toMatchObject({
       provider: 'copilot-cli',
-      branch: 'arena/node-cli'
+      branch: 'arena/default/node-cli'
     });
   });
 
@@ -63,18 +63,27 @@ describe('loadArenaConfig', () => {
 });
 
 describe('resolveArenaPaths', () => {
-  it('resolves all paths within the .arena/ directory', () => {
+  it('resolves all paths within the .arena/<name>/ directory', () => {
     const gitRoot = '/tmp/my-project';
-    const configPath = '/tmp/my-project/.arena/arena.json';
-    const requirementsPath = '/tmp/my-project/.arena/requirements.md';
-    const paths = resolveArenaPaths(gitRoot, configPath, requirementsPath);
+    const paths = resolveArenaPaths(gitRoot, 'default');
 
+    expect(paths.arenaName).toBe('default');
     expect(paths.gitRoot).toBe('/tmp/my-project');
-    expect(paths.arenaDir).toBe(path.join('/tmp/my-project', '.arena'));
-    expect(paths.worktreeDir).toBe(path.join('/tmp/my-project', '.arena', 'worktrees'));
-    expect(paths.sessionFilePath).toBe(path.join('/tmp/my-project', '.arena', 'session.json'));
-    expect(paths.logDir).toBe(path.join('/tmp/my-project', '.arena', 'logs'));
-    expect(paths.reportPath).toBe(path.join('/tmp/my-project', '.arena', 'comparison-report.md'));
+    expect(paths.arenaDir).toBe(path.join('/tmp/my-project', '.arena', 'default'));
+    expect(paths.configPath).toBe(path.join('/tmp/my-project', '.arena', 'default', 'arena.json'));
+    expect(paths.requirementsPath).toBe(path.join('/tmp/my-project', '.arena', 'default', 'requirements.md'));
+    expect(paths.worktreeDir).toBe(path.join('/tmp/my-project', '.arena', 'default', 'worktrees'));
+    expect(paths.sessionFilePath).toBe(path.join('/tmp/my-project', '.arena', 'default', 'session.json'));
+    expect(paths.logDir).toBe(path.join('/tmp/my-project', '.arena', 'default', 'logs'));
+    expect(paths.reportPath).toBe(path.join('/tmp/my-project', '.arena', 'default', 'comparison-report.md'));
+  });
+
+  it('resolves paths for a named arena', () => {
+    const gitRoot = '/tmp/my-project';
+    const paths = resolveArenaPaths(gitRoot, 'my-arena');
+
+    expect(paths.arenaName).toBe('my-arena');
+    expect(paths.arenaDir).toBe(path.join('/tmp/my-project', '.arena', 'my-arena'));
   });
 });
 
@@ -86,24 +95,81 @@ describe('findGitRoot', () => {
 });
 
 describe('discoverArenaConfig', () => {
-  it('discovers .arena/arena.json from a git repository', async () => {
+  it('discovers .arena/<name>/arena.json from a git repository', async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-discover-'));
     await execFileAsync('git', ['init', tempDir]);
-    const arenaDir = path.join(tempDir, '.arena');
+    const arenaDir = path.join(tempDir, '.arena', 'default');
     const configPath = path.join(arenaDir, 'arena.json');
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(arenaDir, { recursive: true });
     await writeFile(configPath, '{}');
 
-    const discovered = await discoverArenaConfig(tempDir);
+    const discovered = await discoverArenaConfig(tempDir, 'default');
     const { realpath: rp } = await import('node:fs/promises');
     expect(await rp(discovered)).toBe(await rp(configPath));
   });
 
-  it('throws when .arena/arena.json does not exist', async () => {
+  it('throws when .arena/<name>/arena.json does not exist', async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-discover-'));
     await execFileAsync('git', ['init', tempDir]);
 
-    await expect(discoverArenaConfig(tempDir)).rejects.toThrow(/no arena configuration found/i);
+    await expect(discoverArenaConfig(tempDir, 'default')).rejects.toThrow(/no arena configuration found/i);
+  });
+});
+
+describe('listArenaNames', () => {
+  it('returns empty when .arena/ does not exist', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-list-'));
+    expect(await listArenaNames(tempDir)).toEqual([]);
+  });
+
+  it('lists arena names that have arena.json', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-list-'));
+    const arenaRoot = path.join(tempDir, '.arena');
+
+    await mkdir(path.join(arenaRoot, 'first'), { recursive: true });
+    await writeFile(path.join(arenaRoot, 'first', 'arena.json'), '{}');
+
+    await mkdir(path.join(arenaRoot, 'second'), { recursive: true });
+    await writeFile(path.join(arenaRoot, 'second', 'arena.json'), '{}');
+
+    // Directory without arena.json should be excluded
+    await mkdir(path.join(arenaRoot, 'empty'), { recursive: true });
+
+    const names = await listArenaNames(tempDir);
+    expect(names).toEqual(['first', 'second']);
+  });
+});
+
+describe('resolveArenaName', () => {
+  it('returns explicit name when provided', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-resolve-'));
+    expect(await resolveArenaName(tempDir, 'my-arena')).toBe('my-arena');
+  });
+
+  it('returns default when no arenas exist', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-resolve-'));
+    expect(await resolveArenaName(tempDir)).toBe('default');
+  });
+
+  it('returns the single arena when exactly one exists', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-resolve-'));
+    const arenaRoot = path.join(tempDir, '.arena', 'only-one');
+    await mkdir(arenaRoot, { recursive: true });
+    await writeFile(path.join(arenaRoot, 'arena.json'), '{}');
+
+    expect(await resolveArenaName(tempDir)).toBe('only-one');
+  });
+
+  it('throws when multiple arenas exist and no name is provided', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-resolve-'));
+    const arenaRoot = path.join(tempDir, '.arena');
+
+    await mkdir(path.join(arenaRoot, 'a'), { recursive: true });
+    await writeFile(path.join(arenaRoot, 'a', 'arena.json'), '{}');
+
+    await mkdir(path.join(arenaRoot, 'b'), { recursive: true });
+    await writeFile(path.join(arenaRoot, 'b', 'arena.json'), '{}');
+
+    await expect(resolveArenaName(tempDir)).rejects.toThrow(/multiple arenas found/i);
   });
 });

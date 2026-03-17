@@ -19,7 +19,7 @@ const createGitRepo = async (): Promise<string> => {
 };
 
 describe('ArenaProject', () => {
-  it('creates a new arena project with .arena/ directory structure', async () => {
+  it('creates a new arena project with .arena/<name>/ directory structure', async () => {
     const gitRoot = await createGitRepo();
     const configSource = path.join(gitRoot, 'arena.json');
     const requirementsSource = path.join(gitRoot, 'REQUIREMENTS.md');
@@ -40,19 +40,56 @@ describe('ArenaProject', () => {
     await writeFile(requirementsSource, '# Build something');
 
     const project = await ArenaProject.create(gitRoot, configSource, requirementsSource);
-    expect(project.paths.arenaDir).toBe(path.join(gitRoot, '.arena'));
+    expect(project.paths.arenaDir).toBe(path.join(gitRoot, '.arena', 'default'));
+    expect(project.paths.arenaName).toBe('default');
     expect(project.config.variants).toHaveLength(1);
-    expect(project.config.variants[0]!.branch).toBe('arena/alpha');
+    expect(project.config.variants[0]!.branch).toBe('arena/default/alpha');
 
-    await access(path.join(gitRoot, '.arena', 'arena.json'));
-    await access(path.join(gitRoot, '.arena', 'requirements.md'));
-    await access(path.join(gitRoot, '.arena', 'worktrees'));
-    await access(path.join(gitRoot, '.arena', 'logs'));
+    await access(path.join(gitRoot, '.arena', 'default', 'arena.json'));
+    await access(path.join(gitRoot, '.arena', 'default', 'requirements.md'));
+    await access(path.join(gitRoot, '.arena', 'default', 'worktrees'));
+    await access(path.join(gitRoot, '.arena', 'default', 'logs'));
   });
 
-  it('loads an existing arena project from config path', async () => {
+  it('creates a named arena project', async () => {
     const gitRoot = await createGitRepo();
-    const arenaDir = path.join(gitRoot, '.arena');
+    const configSource = path.join(gitRoot, 'arena.json');
+    const requirementsSource = path.join(gitRoot, 'REQUIREMENTS.md');
+
+    await writeFile(
+      configSource,
+      JSON.stringify({
+        variants: [
+          {
+            name: 'alpha',
+            model: 'gpt-5',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Clean'
+          }
+        ]
+      })
+    );
+    await writeFile(requirementsSource, '# Build something');
+
+    const project = await ArenaProject.create(gitRoot, configSource, requirementsSource, 'my-arena');
+    expect(project.paths.arenaDir).toBe(path.join(gitRoot, '.arena', 'my-arena'));
+    expect(project.paths.arenaName).toBe('my-arena');
+  });
+
+  it('scaffolds an arena without source files', async () => {
+    const gitRoot = await createGitRepo();
+
+    const project = await ArenaProject.scaffold(gitRoot, 'scaffolded');
+    expect(project.paths.arenaDir).toBe(path.join(gitRoot, '.arena', 'scaffolded'));
+    expect(project.config.variants).toHaveLength(1);
+
+    await access(project.paths.configPath);
+    await access(project.paths.requirementsPath);
+  });
+
+  it('loads an existing arena project by name', async () => {
+    const gitRoot = await createGitRepo();
+    const arenaDir = path.join(gitRoot, '.arena', 'beta');
     await mkdir(arenaDir, { recursive: true });
     const configPath = path.join(arenaDir, 'arena.json');
     const reqPath = path.join(arenaDir, 'requirements.md');
@@ -72,10 +109,9 @@ describe('ArenaProject', () => {
     );
     await writeFile(reqPath, '# Requirements');
 
-    const project = await ArenaProject.load(configPath);
+    const project = await ArenaProject.load(gitRoot, 'beta');
     expect(project.config.variants[0]!.name).toBe('beta');
-    const { realpath: rp } = await import('node:fs/promises');
-    expect(await rp(project.paths.gitRoot)).toBe(await rp(gitRoot));
+    expect(project.paths.arenaName).toBe('beta');
   });
 
   it('returns correct workspaces', async () => {
@@ -96,8 +132,8 @@ describe('ArenaProject', () => {
 
     const project = await ArenaProject.create(gitRoot, configSource, requirementsSource);
     expect(project.workspaces).toHaveLength(2);
-    expect(project.workspaces[0]!.worktreePath).toBe(path.join(gitRoot, '.arena', 'worktrees', 'a'));
-    expect(project.workspaces[1]!.worktreePath).toBe(path.join(gitRoot, '.arena', 'worktrees', 'b'));
+    expect(project.workspaces[0]!.worktreePath).toBe(path.join(gitRoot, '.arena', 'default', 'worktrees', 'a'));
+    expect(project.workspaces[1]!.worktreePath).toBe(path.join(gitRoot, '.arena', 'default', 'worktrees', 'b'));
   });
 
   it('reads requirements content', async () => {
