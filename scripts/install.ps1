@@ -1,41 +1,29 @@
 $ErrorActionPreference = "Stop"
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectDir = Split-Path -Parent $ScriptDir
+$Repo = if ($env:ARENA_REPO) { $env:ARENA_REPO } else { "agent-arena/agent-arena" }
+$Version = if ($env:ARENA_VERSION) { $env:ARENA_VERSION } else { "latest" }
+$InstallDir = if ($env:ARENA_INSTALL_DIR) { $env:ARENA_INSTALL_DIR } else { "$HOME\AppData\Local\Programs\arena" }
 
-Write-Host "🏟️  Installing Agent Arena..." -ForegroundColor Cyan
-
-# 1. Install Copilot CLI agent profile
-$CopilotAgentsDir = Join-Path $env:USERPROFILE ".copilot\agents"
-if (-not (Test-Path $CopilotAgentsDir)) {
-    New-Item -ItemType Directory -Path $CopilotAgentsDir -Force | Out-Null
+$arch = switch ($env:PROCESSOR_ARCHITECTURE.ToLowerInvariant()) {
+  "amd64" { "amd64" }
+  default { throw "Unsupported architecture: $env:PROCESSOR_ARCHITECTURE" }
 }
-Copy-Item (Join-Path $ProjectDir "agents\arena-orchestrator.agent.md") -Destination $CopilotAgentsDir -Force
-Write-Host "✓ Copilot CLI agent profile installed to $CopilotAgentsDir" -ForegroundColor Green
 
-# 2. Install Claude Code custom command
-$ClaudeCommandsDir = Join-Path $env:USERPROFILE ".claude\commands"
-if (-not (Test-Path $ClaudeCommandsDir)) {
-    New-Item -ItemType Directory -Path $ClaudeCommandsDir -Force | Out-Null
+$asset = "arena-windows-$arch.zip"
+$baseUrl = "https://github.com/$Repo/releases"
+$url = if ($Version -eq "latest") {
+  "$baseUrl/latest/download/$asset"
+} else {
+  "$baseUrl/download/$Version/$asset"
 }
-Copy-Item (Join-Path $ProjectDir "agents\arena-orchestrator\orchestrate.md") -Destination $ClaudeCommandsDir -Force
-Write-Host "✓ Claude Code custom command installed to $ClaudeCommandsDir" -ForegroundColor Green
 
-# 3. Build
-Write-Host "Building..."
-Set-Location $ProjectDir
-npm install
-npm run build
-Write-Host "✓ Build complete" -ForegroundColor Green
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("arena-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-# 4. Link globally
-npm link
-Write-Host "✓ 'arena' command linked globally" -ForegroundColor Green
+$archive = Join-Path $tmp $asset
+Invoke-WebRequest -Uri $url -OutFile $archive
+Expand-Archive -Path $archive -DestinationPath $tmp -Force
+Copy-Item (Join-Path $tmp "arena.exe") (Join-Path $InstallDir "arena.exe") -Force
 
-Write-Host ""
-Write-Host "🎉 Agent Arena installed successfully!" -ForegroundColor Green
-Write-Host ""
-Write-Host "Usage:"
-Write-Host "  Via Copilot CLI:  copilot --agent arena-orchestrator"
-Write-Host "  Via Claude Code:  /orchestrate"
-Write-Host "  Via CLI directly: arena --help"
+Write-Host "Installed arena to $InstallDir\arena.exe"

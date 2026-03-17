@@ -1,42 +1,74 @@
-import { AgentProviderSchema, type AgentProvider } from './types.js';
-import { copilotCliProvider } from './copilot-cli.js';
-import { claudeCodeProvider } from './claude-code.js';
+import type { ArenaConfig, ProviderConfig, VariantConfig } from '../domain/types';
+import { BUILTIN_PROVIDERS } from './builtins';
 
-const builtInProviders: Record<string, AgentProvider> = {
-  'copilot-cli': copilotCliProvider,
-  'claude-code': claudeCodeProvider,
-};
+export class ProviderRegistry {
+  private readonly providers: Map<string, ProviderConfig>;
 
-/**
- * Build a provider registry by merging built-in providers with user-defined overrides.
- * User providers override built-ins with the same name, or add new ones.
- */
-export function buildProviderRegistry(
-  userProviders?: Record<string, unknown>,
-): Record<string, AgentProvider> {
-  const registry = { ...builtInProviders };
+  public constructor(customProviders: Record<string, ProviderConfig> = {}) {
+    this.providers = new Map<string, ProviderConfig>();
+    const merged = {
+      ...BUILTIN_PROVIDERS,
+      ...customProviders
+    };
 
-  if (userProviders) {
-    for (const [name, raw] of Object.entries(userProviders)) {
-      registry[name] = AgentProviderSchema.parse(raw);
+    for (const [name, provider] of Object.entries(merged)) {
+      this.providers.set(name, provider);
     }
   }
 
-  return registry;
+  public get(name: string): ProviderConfig {
+    const provider = this.providers.get(name);
+    if (!provider) {
+      throw new Error(`Unknown provider "${name}". Define it in arena.json providers.`);
+    }
+
+    return provider;
+  }
+
+  public list(): string[] {
+    return [...this.providers.keys()].sort();
+  }
 }
 
-/**
- * Get a provider by name from a registry.
- * Throws if the provider is not found.
- */
-export function getProvider(
-  registry: Record<string, AgentProvider>,
-  name: string,
-): AgentProvider {
-  const provider = registry[name];
-  if (!provider) {
-    const available = Object.keys(registry).join(', ');
-    throw new Error(`Unknown agent provider "${name}". Available: ${available}`);
-  }
-  return provider;
+export interface ProviderCommand {
+  command: string;
+  args: string[];
+  stdinPayload?: string;
 }
+
+export const buildProviderCommand = (
+  provider: ProviderConfig,
+  variant: VariantConfig,
+  prompt: string,
+  maxContinues: number
+): ProviderCommand => {
+  const args = [...provider.baseArgs];
+
+  if (provider.modelFlag) {
+    args.push(provider.modelFlag, variant.model);
+  }
+
+  if (provider.maxContinuesFlag) {
+    args.push(provider.maxContinuesFlag, String(maxContinues));
+  }
+
+  switch (provider.promptDelivery) {
+    case 'flag':
+      args.push(provider.promptFlag!, prompt);
+      return { command: provider.command, args };
+    case 'positional':
+      args.push(prompt);
+      return { command: provider.command, args };
+    case 'stdin':
+      return {
+        command: provider.command,
+        args,
+        stdinPayload: `${prompt}\n`
+      };
+    default:
+      return { command: provider.command, args };
+  }
+};
+
+export const createProviderRegistry = (config: ArenaConfig): ProviderRegistry =>
+  new ProviderRegistry(config.providers);

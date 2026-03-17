@@ -1,43 +1,72 @@
 {
   "name": "agent-arena",
-  "version": "1.0.0",
-  "description": "Spawn multiple AI agents in parallel to build competing implementations",
+  "version": "0.1.0",
   "type": "module",
+  "description": "Cross-platform CLI for running competing autonomous coding agents in isolated git worktrees.",
   "bin": {
-    "arena": "./dist/index.js"
+    "arena": "bin/arena.cjs"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "bin",
+    "dist",
+    "README.md",
+    "DESIGN.md",
+    "Formula",
+    "scripts",
+    "Dockerfile"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsup",
+    "dev": "tsx src/cli.ts",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src/",
-    "clean": "rimraf dist"
+    "test:coverage": "vitest run --coverage",
+    "validate": "npm run lint && npm run build && npm run test:coverage",
+    "package:binaries": "npm run build && pkg dist/cli.js --targets node20-linux-x64,node20-linux-arm64,node20-macos-x64,node20-macos-arm64,node20-win-x64 --out-path release"
   },
-  "engines": {
-    "node": ">=18"
+  "pkg": {
+    "assets": [
+      "node_modules/node-pty/build/Release/*.node"
+    ],
+    "outputPath": "release"
   },
-  "keywords": ["ai", "agents", "arena", "copilot", "claude", "cli"],
+  "keywords": [
+    "cli",
+    "ink",
+    "pty",
+    "git-worktree",
+    "ai"
+  ],
+  "author": "",
   "license": "MIT",
   "dependencies": {
-    "chalk": "^5.4.1",
-    "commander": "^13.1.0",
-    "execa": "^9.5.2",
-    "ink": "^5.1.0",
-    "ink-spinner": "^5.0.0",
-    "ink-text-input": "^6.0.0",
-    "node-pty": "^1.1.0",
+    "commander": "^14.0.1",
+    "ink": "^5.2.1",
+    "node-pty": "^1.0.0",
     "react": "^18.3.1",
     "strip-ansi": "^7.1.0",
-    "tree-kill": "^1.2.2",
-    "zod": "^3.24.2"
+    "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@types/node": "^22.13.0",
-    "@types/react": "^18.3.18",
-    "eslint": "^9.19.0",
-    "rimraf": "^6.0.1",
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.5"
+    "@types/node": "^24.3.0",
+    "@types/react": "^18.3.23",
+    "@types/react-test-renderer": "^18.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.42.0",
+    "@typescript-eslint/parser": "^8.42.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^9.34.0",
+    "pkg": "^5.8.1",
+    "react-test-renderer": "^18.3.1",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   }
 }
