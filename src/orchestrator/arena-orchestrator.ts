@@ -9,7 +9,7 @@ import type {
 } from '../domain/types';
 import { buildLaunchPrompt, buildStatusCheckPrompt } from '../prompt/builder';
 import { ProviderRegistry, buildProviderCommand } from '../providers/registry';
-import { ensureTrustedFolder } from '../providers/trusted-folders';
+import { ensureTrustedFolder, registerTrustedFolders } from '../providers/trusted-folders';
 import type { ServerToClientMessage } from '../ipc/protocol';
 import { OutputBuffer } from '../utils/output-buffer';
 import stripAnsi from 'strip-ansi';
@@ -94,10 +94,29 @@ export class ArenaOrchestrator extends EventEmitter<{
   }
 
   public async startAll(): Promise<void> {
-    await Promise.all(this.workspaces.map(async (workspace) => this.startAgent(workspace.variant.name)));
+    // Batch-register all trusted folders before starting agents to avoid
+    // concurrent read-modify-write races on the same config file.
+    await registerTrustedFolders(
+      this.workspaces.map((workspace) => ({
+        provider: this.registry.get(workspace.variant.provider),
+        folderPath: workspace.worktreePath
+      }))
+    );
+
+    // Launch without per-agent trust check — batch registration above covers all.
+    for (const workspace of this.workspaces) {
+      this.launchAgent(workspace.variant.name);
+    }
   }
 
   public async startAgent(agentName: string): Promise<void> {
+    const agent = this.getAgent(agentName);
+    const { variant, worktreePath } = agent.workspace;
+    await ensureTrustedFolder(this.registry.get(variant.provider), worktreePath);
+    this.launchAgent(agentName);
+  }
+
+  private launchAgent(agentName: string): void {
     const agent = this.getAgent(agentName);
     const { variant, worktreePath } = agent.workspace;
     const provider = this.registry.get(variant.provider);
@@ -107,8 +126,6 @@ export class ArenaOrchestrator extends EventEmitter<{
       buildLaunchPrompt(),
       this.config.maxContinues
     );
-
-    await ensureTrustedFolder(provider, worktreePath);
 
     agent.outputBuffer = new OutputBuffer();
     agent.checksPerformed = 0;
