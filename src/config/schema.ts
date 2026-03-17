@@ -16,10 +16,23 @@ const completionProtocolSchema = z.object({
   continueMarker: z.string().min(1).default('ARENA_CONTINUING')
 });
 
-const trustedFoldersSchema = z.object({
+const flatArrayTrustedFoldersSchema = z.object({
+  strategy: z.literal('flat-array'),
   configFile: z.string().min(1),
   jsonKey: z.string().min(1)
 });
+
+const nestedObjectTrustedFoldersSchema = z.object({
+  strategy: z.literal('nested-object'),
+  configFile: z.string().min(1),
+  jsonKey: z.string().min(1),
+  nestedKey: z.string().min(1)
+});
+
+const trustedFoldersSchema = z.discriminatedUnion('strategy', [
+  flatArrayTrustedFoldersSchema,
+  nestedObjectTrustedFoldersSchema
+]);
 
 export const providerConfigSchema = z
   .object({

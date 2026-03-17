@@ -33,5 +33,7 @@ When you are corrected by the user:
 
 ## Learned Conventions
 
+- **Documentation**: Before submitting a PR, verify that README.md, DESIGN.md, and AGENTS.md are up to date with your changes. If you added or changed types, config fields, or provider behavior, update the relevant docs.
+
 <!-- Add corrections and conventions here as they are learned. Format: -->
 <!-- - **Topic**: Description of the correct approach. -->

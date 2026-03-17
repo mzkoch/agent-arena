@@ -16,10 +16,22 @@ export interface CompletionProtocol {
   continueMarker: string;
 }
 
-export interface TrustedFoldersConfig {
+export interface FlatArrayTrustedFoldersConfig {
+  strategy: 'flat-array';
   configFile: string;
   jsonKey: string;
 }
+
+export interface NestedObjectTrustedFoldersConfig {
+  strategy: 'nested-object';
+  configFile: string;
+  jsonKey: string;
+  nestedKey: string;
+}
+
+export type TrustedFoldersConfig =
+  | FlatArrayTrustedFoldersConfig
+  | NestedObjectTrustedFoldersConfig;
 
 export interface ProviderConfig {
   command: string;

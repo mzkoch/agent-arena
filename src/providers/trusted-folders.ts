@@ -19,12 +19,33 @@ export const ensureTrustedFolder = async (
     config = {};
   }
 
-  const key = provider.trustedFolders.jsonKey;
-  const folders = Array.isArray(config[key]) ? (config[key] as unknown[]) : [];
-  const normalizedFolders = folders.filter((value): value is string => typeof value === 'string');
+  const { jsonKey } = provider.trustedFolders;
 
-  if (!normalizedFolders.includes(folderPath)) {
-    config[key] = [...normalizedFolders, folderPath];
-    await writeJsonFile(configFilePath, config);
+  if (provider.trustedFolders.strategy === 'flat-array') {
+    const folders = Array.isArray(config[jsonKey]) ? (config[jsonKey] as unknown[]) : [];
+    const normalizedFolders = folders.filter((value): value is string => typeof value === 'string');
+
+    if (!normalizedFolders.includes(folderPath)) {
+      config[jsonKey] = [...normalizedFolders, folderPath];
+      await writeJsonFile(configFilePath, config);
+    }
+  } else {
+    const { nestedKey } = provider.trustedFolders;
+    const raw = config[jsonKey];
+    const existing =
+      typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : {};
+    const rawEntry = existing[folderPath];
+    const projectEntry =
+      typeof rawEntry === 'object' && rawEntry !== null && !Array.isArray(rawEntry)
+        ? (rawEntry as Record<string, unknown>)
+        : {};
+
+    if (projectEntry[nestedKey] !== true) {
+      existing[folderPath] = { ...projectEntry, [nestedKey]: true };
+      config[jsonKey] = existing;
+      await writeJsonFile(configFilePath, config);
+    }
   }
 };
