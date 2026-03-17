@@ -1,8 +1,12 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { loadArenaConfig, resolveArenaPaths } from './load';
+import { discoverArenaConfig, findGitRoot, loadArenaConfig, resolveArenaPaths } from './load';
+
+const execFileAsync = promisify(execFile);
 
 describe('loadArenaConfig', () => {
   it('applies defaults for provider, branch, and numeric fields', async () => {
@@ -11,7 +15,6 @@ describe('loadArenaConfig', () => {
     await writeFile(
       configPath,
       JSON.stringify({
-        repoName: 'demo',
         variants: [
           {
             name: 'node-cli',
@@ -28,7 +31,7 @@ describe('loadArenaConfig', () => {
     expect(config.agentTimeoutMs).toBe(3_600_000);
     expect(config.variants[0]).toMatchObject({
       provider: 'copilot-cli',
-      branch: 'variant/node-cli'
+      branch: 'arena/node-cli'
     });
   });
 
@@ -38,7 +41,6 @@ describe('loadArenaConfig', () => {
     await writeFile(
       configPath,
       JSON.stringify({
-        repoName: 'demo',
         variants: [
           {
             name: 'duplicate',
@@ -58,20 +60,50 @@ describe('loadArenaConfig', () => {
 
     await expect(loadArenaConfig(configPath)).rejects.toThrow(/duplicated/i);
   });
+});
 
-  it('resolves repo, worktree, and session paths', () => {
-    const configPath = '/tmp/example/arena.json';
-    const requirementsPath = '/tmp/example/requirements.md';
-    const paths = resolveArenaPaths(configPath, requirementsPath, {
-      repoName: 'demo',
-      maxContinues: 50,
-      agentTimeoutMs: 10,
-      providers: {},
-      variants: []
-    });
+describe('resolveArenaPaths', () => {
+  it('resolves all paths within the .arena/ directory', () => {
+    const gitRoot = '/tmp/my-project';
+    const configPath = '/tmp/my-project/.arena/arena.json';
+    const requirementsPath = '/tmp/my-project/.arena/requirements.md';
+    const paths = resolveArenaPaths(gitRoot, configPath, requirementsPath);
 
-    expect(paths.repoPath).toBe(path.resolve('/tmp/example', 'demo'));
-    expect(paths.worktreeDir).toBe(path.resolve('/tmp/example', 'demo-worktrees'));
-    expect(paths.sessionFilePath).toBe(path.resolve('/tmp/example', 'demo', '.arena-session.json'));
+    expect(paths.gitRoot).toBe('/tmp/my-project');
+    expect(paths.arenaDir).toBe(path.join('/tmp/my-project', '.arena'));
+    expect(paths.worktreeDir).toBe(path.join('/tmp/my-project', '.arena', 'worktrees'));
+    expect(paths.sessionFilePath).toBe(path.join('/tmp/my-project', '.arena', 'session.json'));
+    expect(paths.logDir).toBe(path.join('/tmp/my-project', '.arena', 'logs'));
+    expect(paths.reportPath).toBe(path.join('/tmp/my-project', '.arena', 'comparison-report.md'));
+  });
+});
+
+describe('findGitRoot', () => {
+  it('throws when not in a git repository', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-nogit-'));
+    await expect(findGitRoot(tempDir)).rejects.toThrow(/not inside a git repository/i);
+  });
+});
+
+describe('discoverArenaConfig', () => {
+  it('discovers .arena/arena.json from a git repository', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-discover-'));
+    await execFileAsync('git', ['init', tempDir]);
+    const arenaDir = path.join(tempDir, '.arena');
+    const configPath = path.join(arenaDir, 'arena.json');
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(arenaDir, { recursive: true });
+    await writeFile(configPath, '{}');
+
+    const discovered = await discoverArenaConfig(tempDir);
+    const { realpath: rp } = await import('node:fs/promises');
+    expect(await rp(discovered)).toBe(await rp(configPath));
+  });
+
+  it('throws when .arena/arena.json does not exist', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-discover-'));
+    await execFileAsync('git', ['init', tempDir]);
+
+    await expect(discoverArenaConfig(tempDir)).rejects.toThrow(/no arena configuration found/i);
   });
 });

@@ -59,7 +59,7 @@ export const scoreVariant = (metrics: Omit<EvaluationVariantMetrics, 'score' | '
 };
 
 export const evaluateWorkspaces = async (
-  repoPath: string,
+  gitRoot: string,
   workspaces: VariantWorkspace[]
 ): Promise<EvaluationReport> => {
   const variants = await Promise.all(
@@ -77,11 +77,11 @@ export const evaluateWorkspaces = async (
   );
 
   const winner = [...variants].sort((left, right) => right.score - left.score)[0]?.name ?? 'n/a';
-  const markdown = renderComparisonReport(repoPath, variants, winner);
+  const markdown = renderComparisonReport(gitRoot, variants, winner);
 
   return {
     generatedAt: new Date().toISOString(),
-    repoPath,
+    gitRoot,
     winner,
     variants,
     markdown
@@ -89,14 +89,14 @@ export const evaluateWorkspaces = async (
 };
 
 export const renderComparisonReport = (
-  repoPath: string,
+  gitRoot: string,
   variants: EvaluationVariantMetrics[],
   winner: string
 ): string => `# Comparison Report
 
 Generated: ${new Date().toISOString()}
 
-Repository: \`${repoPath}\`
+Repository: \`${gitRoot}\`
 
 Recommended winner: **${winner}**
 
@@ -126,10 +126,9 @@ ${variant.notes.map((note) => `  - ${note}`).join('\n')}`
 `;
 
 export const writeComparisonReport = async (
-  repoPath: string,
+  reportPath: string,
   report: EvaluationReport
 ): Promise<string> => {
-  const outputPath = path.join(repoPath, 'comparison-report.md');
-  await writeTextFile(outputPath, report.markdown);
-  return outputPath;
+  await writeTextFile(reportPath, report.markdown);
+  return reportPath;
 };

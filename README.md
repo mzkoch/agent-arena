@@ -8,7 +8,8 @@ It is built with TypeScript, Commander, Ink, `node-pty`, and Zod, and is designe
 
 When you want several AI agents to compete on the same project brief, you usually end up juggling terminals, worktrees, prompts, and ad-hoc scripts. Agent Arena wraps that workflow into one tool:
 
-- isolated git worktrees per variant
+- isolated git worktrees per variant, created as branches on your own repository
+- all arena state contained in a single `.arena/` directory
 - provider/model aware launch commands
 - a live Ink TUI for dashboard and detail views
 - headless mode with TCP/NDJSON IPC for monitoring from another terminal
@@ -26,7 +27,6 @@ Create an `arena.json`:
 
 ```json
 {
-  "repoName": "demo-arena",
   "variants": [
     {
       "name": "copilot-node",
@@ -58,54 +58,82 @@ cat > REQUIREMENTS.md <<'EOF'
 EOF
 ```
 
-Initialize worktrees:
+Initialize worktrees (from inside your git repository):
 
 ```bash
-arena init arena.json REQUIREMENTS.md
+arena init --config arena.json --requirements REQUIREMENTS.md
 ```
 
 Launch with the TUI:
 
 ```bash
-arena launch arena.json REQUIREMENTS.md
+arena launch
 ```
 
 Launch headless, then monitor from another terminal:
 
 ```bash
-arena launch arena.json REQUIREMENTS.md --headless
-arena monitor arena.json REQUIREMENTS.md
+arena launch --headless
+arena monitor
 ```
 
 Check structured status:
 
 ```bash
-arena status arena.json REQUIREMENTS.md
+arena status
 ```
 
 Generate a comparison report:
 
 ```bash
-arena evaluate arena.json REQUIREMENTS.md
+arena evaluate
 ```
 
-Clean worktrees:
+Clean worktrees and branches:
 
 ```bash
-arena clean ./demo-arena
+arena clean
 ```
+
+## Project Layout
+
+After `arena init`, your project looks like:
+
+```
+my-project/
+├── .arena/
+│   ├── arena.json
+│   ├── requirements.md
+│   ├── session.json          # created during launch
+│   ├── comparison-report.md  # created by evaluate
+│   ├── logs/
+│   └── worktrees/
+│       ├── copilot-node/     # branch: arena/copilot-node
+│       └── claude-fastify/   # branch: arena/claude-fastify
+├── src/
+├── package.json
+└── .gitignore                # .arena/ added automatically
+```
+
+Each variant worktree is a branch on your own repo (`arena/<name>`), so you can:
+
+- `git diff main..arena/copilot-node` to compare
+- `git merge arena/copilot-node` to adopt the winner
+- Open a GitHub PR from `arena/copilot-node` to `main`
 
 ## CLI Reference
 
 | Command | Description |
 | --- | --- |
-| `arena init <config> <requirements>` | Create the git repo and a worktree per variant |
-| `arena launch <config> <requirements> [--headless]` | Launch all agents with the TUI or in headless mode |
-| `arena monitor <config> <requirements>` | Attach the TUI to a running headless session |
-| `arena status <config> <requirements>` | Print JSON state for the arena |
-| `arena evaluate <config> <requirements>` | Scan worktrees and write `comparison-report.md` |
-| `arena clean <repo-path>` | Remove worktrees and prune git state |
+| `arena init --config <path> --requirements <path>` | Create `.arena/` with config, worktrees, and gitignore entry |
+| `arena launch [--headless]` | Launch all agents with the TUI or in headless mode |
+| `arena monitor` | Attach the TUI to a running headless session |
+| `arena status` | Print JSON state for the arena |
+| `arena evaluate` | Scan worktrees and write `.arena/comparison-report.md` |
+| `arena clean [--keep-config]` | Remove worktrees, branches, and `.arena/` state |
 | `arena version` | Print the installed version |
+
+All commands except `init` work with zero arguments when `.arena/arena.json` exists. You can override with `--config` and `--requirements` flags.
 
 Global flags:
 
@@ -116,10 +144,8 @@ Global flags:
 
 ```json
 {
-  "repoName": "my-project-arena",
   "maxContinues": 50,
   "agentTimeoutMs": 3600000,
-  "worktreeDir": "./custom-worktrees",
   "providers": {},
   "variants": [
     {
@@ -128,7 +154,7 @@ Global flags:
       "model": "claude-sonnet-4.5",
       "techStack": "Node.js with Express, TypeScript",
       "designPhilosophy": "Focus on simplicity and DX",
-      "branch": "variant/node-copilot"
+      "branch": "arena/node-copilot"
     }
   ]
 }
@@ -138,10 +164,9 @@ Global flags:
 
 | Field | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `repoName` | Yes | — | Repo folder created next to the config file |
+| `repoName` | No | — | Optional, kept for backward compatibility |
 | `maxContinues` | No | `50` | Passed to providers that expose a max-steps flag |
 | `agentTimeoutMs` | No | `3600000` | Hard timeout per agent |
-| `worktreeDir` | No | `../<repoName>-worktrees` | Base directory for all variant worktrees |
 | `providers` | No | `{}` | Custom or overriding provider definitions |
 | `variants` | Yes | — | One or more variant configs |
 
@@ -154,7 +179,7 @@ Global flags:
 | `model` | Yes | — | Provider-specific model name |
 | `techStack` | Yes | — | Written into per-worktree instructions |
 | `designPhilosophy` | Yes | — | Written into per-worktree instructions |
-| `branch` | No | `variant/<name>` | Branch name for the worktree |
+| `branch` | No | `arena/<name>` | Branch name for the worktree |
 
 ## Provider System
 

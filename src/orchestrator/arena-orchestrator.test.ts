@@ -80,7 +80,7 @@ const config: ArenaConfig = {
 
 const workspaces: VariantWorkspace[] = [
   {
-    variant: config.variants[0],
+    variant: config.variants[0]!,
     worktreePath: '/tmp/alpha'
   }
 ];
@@ -90,7 +90,7 @@ describe('ArenaOrchestrator', () => {
     const fakePty = new FakePty();
     const ptyFactory: PtyFactory = () => fakePty;
     const terminator = vi.fn(() => Promise.resolve());
-    const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/repo', logger, {
+    const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
       ptyFactory,
       processTerminator: terminator
     });
@@ -113,7 +113,7 @@ describe('ArenaOrchestrator', () => {
   it('sends status checks on idle and resets when continue marker arrives', async () => {
     vi.useFakeTimers();
     const fakePty = new FakePty();
-    const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/repo', logger, {
+    const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
       ptyFactory: () => fakePty,
       processTerminator: () => Promise.resolve()
     });

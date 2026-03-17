@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 release/
+.arena/
 .arena-session.json
 .DS_Store
 npm-debug.log*
@@ -9,6 +10,10 @@ npm-debug.log*
 # Arena session artifacts
 agent-arena-v2/
 agent-arena-v2-worktrees/
+issue-5-arena/
+issue-5-arena-worktrees/
+issue-5-arena.json
+issue-5-requirements.md
 reimpl-arena.json
 reimpl-requirements.md
 comparison-report.md

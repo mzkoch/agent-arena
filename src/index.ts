@@ -18,4 +18,5 @@ export * from './utils/files';
 export * from './utils/format';
 export * from './utils/logger';
 export * from './utils/output-buffer';
+export * from './project/arena-project';
 export * from './utils/process';

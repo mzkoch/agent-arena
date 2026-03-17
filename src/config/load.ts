@@ -1,7 +1,15 @@
+import { access } from 'node:fs/promises';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { ArenaConfig, ArenaPaths, VariantConfig } from '../domain/types';
 import { readJsonFile } from '../utils/files';
 import { arenaConfigSchema } from './schema';
+
+const execFileAsync = promisify(execFile);
+
+const ARENA_DIR = '.arena';
+const ARENA_CONFIG_NAME = 'arena.json';
 
 const normalizeVariant = (variant: {
   name: string;
@@ -12,21 +20,13 @@ const normalizeVariant = (variant: {
   branch?: string | undefined;
 }): VariantConfig => ({
   ...variant,
-  branch: variant.branch ?? `variant/${variant.name}`
+  branch: variant.branch ?? `arena/${variant.name}`
 });
 
 export const loadArenaConfig = async (configPath: string): Promise<ArenaConfig> => {
   const raw = await readJsonFile<unknown>(configPath);
   const parsed = arenaConfigSchema.parse(raw);
   const normalizedVariants = parsed.variants.map(normalizeVariant);
-
-  if (parsed.worktreeDir) {
-    return {
-      ...parsed,
-      worktreeDir: parsed.worktreeDir,
-      variants: normalizedVariants
-    };
-  }
 
   return {
     repoName: parsed.repoName,
@@ -37,25 +37,47 @@ export const loadArenaConfig = async (configPath: string): Promise<ArenaConfig> 
   };
 };
 
-export const resolveArenaPaths = (
-  configPath: string,
-  requirementsPath: string,
-  config: ArenaConfig
-): ArenaPaths => {
-  const resolvedConfigPath = path.resolve(configPath);
-  const resolvedRequirementsPath = path.resolve(requirementsPath);
-  const repoPath = path.resolve(path.dirname(resolvedConfigPath), config.repoName);
-  const worktreeDir = config.worktreeDir
-    ? path.resolve(path.dirname(resolvedConfigPath), config.worktreeDir)
-    : path.resolve(repoPath, '..', `${config.repoName}-worktrees`);
+export const findGitRoot = async (from?: string): Promise<string> => {
+  const cwd = from ?? process.cwd();
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd });
+    return stdout.trim();
+  } catch {
+    throw new Error(
+      `Not inside a git repository (searched from ${cwd}). Run "git init" first or navigate to a git project.`
+    );
+  }
+};
 
+export const resolveArenaPaths = (
+  gitRoot: string,
+  configPath: string,
+  requirementsPath: string
+): ArenaPaths => {
+  const arenaDir = path.join(gitRoot, ARENA_DIR);
   return {
-    configPath: resolvedConfigPath,
-    requirementsPath: resolvedRequirementsPath,
-    repoPath,
-    worktreeDir,
-    sessionFilePath: path.join(repoPath, '.arena-session.json')
+    configPath: path.resolve(configPath),
+    requirementsPath: path.resolve(requirementsPath),
+    gitRoot,
+    arenaDir,
+    worktreeDir: path.join(arenaDir, 'worktrees'),
+    sessionFilePath: path.join(arenaDir, 'session.json'),
+    logDir: path.join(arenaDir, 'logs'),
+    reportPath: path.join(arenaDir, 'comparison-report.md')
   };
+};
+
+export const discoverArenaConfig = async (from?: string): Promise<string> => {
+  const gitRoot = await findGitRoot(from);
+  const configPath = path.join(gitRoot, ARENA_DIR, ARENA_CONFIG_NAME);
+  try {
+    await access(configPath);
+  } catch {
+    throw new Error(
+      `No arena configuration found at ${configPath}. Run "arena init" first.`
+    );
+  }
+  return configPath;
 };
 
 export const getVariantWorktreePath = (
