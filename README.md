@@ -132,8 +132,8 @@ my-project/
 │       ├── comparison-report.md # created by evaluate
 │       ├── logs/
 │       └── worktrees/
-│           ├── copilot-node/   # branch: arena/copilot-node
-│           └── claude-fastify/ # branch: arena/claude-fastify
+│           ├── copilot-node/   # branch: arena/default/copilot-node
+│           └── claude-fastify/ # branch: arena/default/claude-fastify
 ├── src/
 ├── package.json
 └── .gitignore                  # .arena/ added automatically

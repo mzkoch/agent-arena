@@ -27,8 +27,8 @@ my-project/
 │   │   ├── comparison-report.md  # evaluation output
 │   │   ├── logs/                 # agent logs
 │   │   └── worktrees/
-│   │       ├── variant-a/        # git worktree (branch: arena/variant-a)
-│   │       └── variant-b/        # git worktree (branch: arena/variant-b)
+│   │       ├── variant-a/        # git worktree (branch: arena/default/variant-a)
+│   │       └── variant-b/        # git worktree (branch: arena/default/variant-b)
 │   └── experiment/               # a second arena
 │       ├── arena.json
 │       ├── requirements.md
@@ -42,8 +42,8 @@ my-project/
 Worktrees are branches on the user's own repository (`arena/<name>`), not a separate repo. This means:
 
 - **One-line gitignore**: `.arena/` contains all artifacts
-- **Direct PRs**: `git merge arena/variant-a` or a GitHub PR from `arena/variant-a` → `main`
-- **Clean diffing**: `git diff main..arena/variant-a` works natively
+- **Direct PRs**: `git merge arena/default/variant-a` or a GitHub PR from `arena/default/variant-a` → `main`
+- **Clean diffing**: `git diff main..arena/default/variant-a` works natively
 - **No copy step**: no need to copy files out of a separate repo
 
 ### 2. Multiple Arena Support
