@@ -9,28 +9,34 @@ Agent Arena must:
 - expose both a local Ink TUI and a remote monitor path through headless IPC
 - detect completion through provider-specific status markers
 - evaluate worktrees and summarize results in a comparison report
+- support multiple concurrent arenas within the same repository
 
 ## Architecture Decisions
 
 ### 1. `.arena/` project folder with same-repo worktrees
 
-All arena state lives in a single `.arena/` directory inside the user's project:
+All arena state lives in a single `.arena/` directory inside the user's project. Each arena session gets its own named subdirectory:
 
 ```
 my-project/
 ├── .arena/
-│   ├── arena.json              # config (copied at init)
-│   ├── requirements.md         # requirements doc (copied at init)
-│   ├── session.json            # IPC/session state
-│   ├── comparison-report.md    # evaluation output
-│   ├── logs/                   # agent logs
-│   └── worktrees/
-│       ├── variant-a/          # git worktree (branch: arena/variant-a)
-│       ├── variant-b/          # git worktree (branch: arena/variant-b)
-│       └── variant-c/          # git worktree (branch: arena/variant-c)
+│   ├── default/                  # the "default" arena
+│   │   ├── arena.json            # config
+│   │   ├── requirements.md       # requirements doc
+│   │   ├── session.json          # IPC/session state
+│   │   ├── comparison-report.md  # evaluation output
+│   │   ├── logs/                 # agent logs
+│   │   └── worktrees/
+│   │       ├── variant-a/        # git worktree (branch: arena/variant-a)
+│   │       └── variant-b/        # git worktree (branch: arena/variant-b)
+│   └── experiment/               # a second arena
+│       ├── arena.json
+│       ├── requirements.md
+│       └── worktrees/
+│           └── variant-c/
 ├── src/
 ├── package.json
-└── .gitignore                  # just add: .arena/
+└── .gitignore                    # just add: .arena/
 ```
 
 Worktrees are branches on the user's own repository (`arena/<name>`), not a separate repo. This means:
@@ -40,26 +46,36 @@ Worktrees are branches on the user's own repository (`arena/<name>`), not a sepa
 - **Clean diffing**: `git diff main..arena/variant-a` works natively
 - **No copy step**: no need to copy files out of a separate repo
 
-### 2. ArenaProject abstraction
+### 2. Multiple Arena Support
 
-`src/project/arena-project.ts` encapsulates the `.arena/` directory layout as a first-class object. It handles:
+Each arena session is an independent subdirectory under `.arena/`. The CLI resolves which arena to operate on:
+
+- If a name is provided as a positional argument (e.g. `arena launch my-arena`), use that arena.
+- If only one arena exists, use it automatically.
+- If no arenas exist, use "default" as the arena name.
+- If multiple arenas exist and no name is specified, error with the list of available arenas.
+
+### 3. ArenaProject abstraction
+
+`src/project/arena-project.ts` encapsulates the `.arena/<name>/` directory layout as a first-class object. It handles:
 
 - Creating new arena projects (copying config, creating directory structure)
-- Loading existing projects from config
+- Scaffolding new arenas with default config and requirements
+- Loading existing projects by name with auto-discovery
 - Computing workspace paths for each variant
 - Managing `.gitignore` entries
 
-### 3. Zero-arg convention-over-configuration
+### 4. Zero-arg convention-over-configuration
 
-All CLI commands work with zero positional arguments when `.arena/arena.json` exists. The config discovery flow:
+All CLI commands work with zero positional arguments when a single arena exists. The config discovery flow:
 
 1. Find the git root from the current working directory
-2. Look for `.arena/arena.json`
-3. Resolve all paths relative to the git root
+2. Scan `.arena/` for named subdirectories containing `arena.json`
+3. If exactly one exists, use it; if none exist, default to "default"; if multiple exist, require an explicit name
 
-Optional `--config` and `--requirements` flags override auto-discovery.
+No `--config` or `--requirements` flags are needed. The `init` command optionally accepts `--config` and `--requirements` to copy external files into the arena; without them, it scaffolds a default config.
 
-### 4. Separate CLI from library modules
+### 5. Separate CLI from library modules
 
 `src/cli.ts` is a thin Commander entry point. Everything important lives in testable modules under `src/`, including:
 
@@ -73,18 +89,18 @@ Optional `--config` and `--requirements` flags override auto-discovery.
 
 This keeps the CLI surface small and preserves clean seams for tests and future embedding.
 
-### 5. Dependency injection at the orchestration edge
+### 6. Dependency injection at the orchestration edge
 
 `ArenaOrchestrator` accepts injected PTY and process-termination implementations. That keeps the runtime platform-specific but lets tests run with fake PTYs and stub process management.
 
-### 6. PTY-first process management
+### 7. PTY-first process management
 
 The orchestrator is designed around PTYs rather than pipes so that interactive agent CLIs behave consistently:
 
 - Unix uses `node-pty` backed by the native PTY implementation
 - Windows uses `node-pty` backed by ConPTY
 
-### 7. Event-based state propagation
+### 8. Event-based state propagation
 
 The orchestrator emits full agent state updates and incremental output chunks. The same event model feeds both the local Ink TUI and the IPC server for headless monitoring.
 
@@ -153,7 +169,7 @@ Encoding: newline-delimited JSON (NDJSON).
 
 ### Session file
 
-The headless launcher writes `.arena/session.json`:
+The headless launcher writes `.arena/<name>/session.json`:
 
 ```json
 {
@@ -189,7 +205,7 @@ Evaluation is intentionally lightweight and deterministic:
 - `README.md` present
 - `DESIGN.md` present
 
-The scorer produces a simple recommendation and writes `.arena/comparison-report.md`.
+The scorer produces a simple recommendation and writes `.arena/<name>/comparison-report.md`.
 
 ## Trade-offs
 

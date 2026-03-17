@@ -63,6 +63,7 @@ export interface ArenaConfig {
 }
 
 export interface ArenaPaths {
+  arenaName: string;
   configPath: string;
   requirementsPath: string;
   gitRoot: string;

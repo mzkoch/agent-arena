@@ -49,7 +49,7 @@ Create an `arena.json`:
 Create your requirements file:
 
 ```bash
-cat > REQUIREMENTS.md <<'EOF'
+cat > requirements.md <<'EOF'
 # Build a TODO API
 
 - CRUD for tasks
@@ -61,7 +61,13 @@ EOF
 Initialize worktrees (from inside your git repository):
 
 ```bash
-arena init --config arena.json --requirements REQUIREMENTS.md
+arena init --config arena.json --requirements requirements.md
+```
+
+Or scaffold a new arena with default config (edit `.arena/default/arena.json` and `.arena/default/requirements.md` afterwards):
+
+```bash
+arena init
 ```
 
 Launch with the TUI:
@@ -95,6 +101,23 @@ Clean worktrees and branches:
 arena clean
 ```
 
+### Multiple Arenas
+
+Run multiple concurrent arenas by providing a name:
+
+```bash
+arena init my-experiment --config arena.json --requirements requirements.md
+arena init another-run --config arena2.json --requirements requirements2.md
+
+arena launch my-experiment
+arena launch another-run --headless
+arena status my-experiment
+arena evaluate another-run
+arena clean my-experiment
+```
+
+When only one arena exists, the name is optional. When multiple arenas exist, you must specify which one to use.
+
 ## Project Layout
 
 After `arena init`, your project looks like:
@@ -102,17 +125,18 @@ After `arena init`, your project looks like:
 ```
 my-project/
 ├── .arena/
-│   ├── arena.json
-│   ├── requirements.md
-│   ├── session.json          # created during launch
-│   ├── comparison-report.md  # created by evaluate
-│   ├── logs/
-│   └── worktrees/
-│       ├── copilot-node/     # branch: arena/copilot-node
-│       └── claude-fastify/   # branch: arena/claude-fastify
+│   └── default/                # arena name (default when not specified)
+│       ├── arena.json
+│       ├── requirements.md
+│       ├── session.json        # created during launch
+│       ├── comparison-report.md # created by evaluate
+│       ├── logs/
+│       └── worktrees/
+│           ├── copilot-node/   # branch: arena/copilot-node
+│           └── claude-fastify/ # branch: arena/claude-fastify
 ├── src/
 ├── package.json
-└── .gitignore                # .arena/ added automatically
+└── .gitignore                  # .arena/ added automatically
 ```
 
 Each variant worktree is a branch on your own repo (`arena/<name>`), so you can:
@@ -125,15 +149,21 @@ Each variant worktree is a branch on your own repo (`arena/<name>`), so you can:
 
 | Command | Description |
 | --- | --- |
-| `arena init --config <path> --requirements <path>` | Create `.arena/` with config, worktrees, and gitignore entry |
-| `arena launch [--headless]` | Launch all agents with the TUI or in headless mode |
-| `arena monitor` | Attach the TUI to a running headless session |
-| `arena status` | Print JSON state for the arena |
-| `arena evaluate` | Scan worktrees and write `.arena/comparison-report.md` |
-| `arena clean [--keep-config]` | Remove worktrees, branches, and `.arena/` state |
+| `arena init [name]` | Create `.arena/<name>/` with scaffolded or copied config and worktrees |
+| `arena launch [name] [--headless]` | Launch all agents with the TUI or in headless mode |
+| `arena monitor [name]` | Attach the TUI to a running headless session |
+| `arena status [name]` | Print JSON state for the arena |
+| `arena evaluate [name]` | Scan worktrees and write comparison report |
+| `arena clean [name] [--keep-config]` | Remove worktrees, branches, and arena state |
 | `arena version` | Print the installed version |
 
-All commands except `init` work with zero arguments when `.arena/arena.json` exists. You can override with `--config` and `--requirements` flags.
+`init` options:
+
+- `--config <path>` copies an existing arena.json into `.arena/<name>/`
+- `--requirements <path>` copies an existing requirements file into `.arena/<name>/`
+- Both must be provided together, or omit both to scaffold default files
+
+All commands auto-discover the arena from `.arena/`. When only one arena exists, the `[name]` argument is optional. When multiple arenas exist, you must specify which one.
 
 Global flags:
 

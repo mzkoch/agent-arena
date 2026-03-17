@@ -1,7 +1,7 @@
 import { access, copyFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ArenaPaths, ArenaConfig, VariantWorkspace } from '../domain/types';
-import { loadArenaConfig, resolveArenaPaths, findGitRoot } from '../config/load';
+import { loadArenaConfig, resolveArenaPaths, resolveArenaName } from '../config/load';
 import { ensureDir, readTextFile, writeTextFile } from '../utils/files';
 
 const exists = async (value: string): Promise<boolean> => {
@@ -19,39 +19,76 @@ export class ArenaProject {
     public readonly config: ArenaConfig
   ) {}
 
+  /**
+   * Create a new arena project.
+   * - If configSource/requirementsSource are provided, files are copied into `.arena/<arenaName>/`.
+   * - The arenaName defaults to "default" if not provided.
+   */
   public static async create(
     gitRoot: string,
     configSource: string,
-    requirementsSource: string
+    requirementsSource: string,
+    arenaName?: string
   ): Promise<ArenaProject> {
-    const arenaDir = path.join(gitRoot, '.arena');
-    const configDest = path.join(arenaDir, 'arena.json');
-    const requirementsDest = path.join(arenaDir, 'requirements.md');
+    const name = arenaName ?? 'default';
+    const paths = resolveArenaPaths(gitRoot, name);
 
-    await ensureDir(arenaDir);
-    await ensureDir(path.join(arenaDir, 'worktrees'));
-    await ensureDir(path.join(arenaDir, 'logs'));
+    await ensureDir(paths.arenaDir);
+    await ensureDir(paths.worktreeDir);
+    await ensureDir(paths.logDir);
 
-    await copyFile(path.resolve(configSource), configDest);
-    await copyFile(path.resolve(requirementsSource), requirementsDest);
+    await copyFile(path.resolve(configSource), paths.configPath);
+    await copyFile(path.resolve(requirementsSource), paths.requirementsPath);
 
-    const config = await loadArenaConfig(configDest);
-    const paths = resolveArenaPaths(gitRoot, configDest, requirementsDest);
+    const config = await loadArenaConfig(paths.configPath);
 
+    return new ArenaProject(
+      resolveArenaPaths(gitRoot, name),
+      config
+    );
+  }
+
+  /**
+   * Scaffold a new empty arena with default config and requirements.
+   */
+  public static async scaffold(
+    gitRoot: string,
+    arenaName?: string
+  ): Promise<ArenaProject> {
+    const name = arenaName ?? 'default';
+    const paths = resolveArenaPaths(gitRoot, name);
+
+    await ensureDir(paths.arenaDir);
+    await ensureDir(paths.worktreeDir);
+    await ensureDir(paths.logDir);
+
+    const defaultConfig = JSON.stringify({
+      variants: [
+        {
+          name: 'agent-1',
+          model: 'claude-sonnet-4.5',
+          techStack: 'TypeScript',
+          designPhilosophy: 'Clean and testable'
+        }
+      ]
+    }, null, 2);
+
+    const defaultRequirements = '# Requirements\n\nDescribe what the agents should build.\n';
+
+    await writeTextFile(paths.configPath, defaultConfig);
+    await writeTextFile(paths.requirementsPath, defaultRequirements);
+
+    const config = await loadArenaConfig(paths.configPath);
     return new ArenaProject(paths, config);
   }
 
   public static async load(
-    configPath: string,
-    requirementsPath?: string
+    gitRoot: string,
+    arenaName?: string
   ): Promise<ArenaProject> {
-    const config = await loadArenaConfig(configPath);
-    const gitRoot = await findGitRoot(path.dirname(configPath));
-
-    const resolvedRequirements = requirementsPath
-      ?? path.join(path.dirname(configPath), 'requirements.md');
-
-    const paths = resolveArenaPaths(gitRoot, configPath, resolvedRequirements);
+    const name = await resolveArenaName(gitRoot, arenaName);
+    const paths = resolveArenaPaths(gitRoot, name);
+    const config = await loadArenaConfig(paths.configPath);
     return new ArenaProject(paths, config);
   }
 

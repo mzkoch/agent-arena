@@ -1,10 +1,9 @@
 import { access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { ArenaConfig, ArenaPaths, ArenaSessionFile, Logger, VariantWorkspace } from '../domain/types';
-import { discoverArenaConfig, findGitRoot, loadArenaConfig, resolveArenaPaths } from '../config/load';
+import { findGitRoot, resolveArenaPaths, resolveArenaName, loadArenaConfig } from '../config/load';
 import { buildArenaInstructions } from '../prompt/builder';
 import { ProviderRegistry } from '../providers/registry';
-import { readTextFile } from '../utils/files';
 import { NodeCommandRunner } from '../git/command-runner';
 import { GitRepositoryManager, buildVariantWorkspaces } from '../git/repository';
 import { ArenaProject } from '../project/arena-project';
@@ -27,20 +26,14 @@ export interface ArenaRuntimeContext {
 }
 
 export const loadRuntimeContext = async (
-  configPath: string | undefined,
-  requirementsPath: string | undefined,
+  arenaName: string | undefined,
   logger: Logger
 ): Promise<ArenaRuntimeContext> => {
-  const resolvedConfigPath = configPath ?? await discoverArenaConfig();
-  const config = await loadArenaConfig(resolvedConfigPath);
-
-  const gitRoot = await findGitRoot(path.dirname(resolvedConfigPath));
-
-  const resolvedRequirementsPath = requirementsPath
-    ?? path.join(path.dirname(resolvedConfigPath), 'requirements.md');
-
-  const paths = resolveArenaPaths(gitRoot, resolvedConfigPath, resolvedRequirementsPath);
-  const requirementsContent = await readTextFile(paths.requirementsPath);
+  const gitRoot = await findGitRoot();
+  const name = await resolveArenaName(gitRoot, arenaName);
+  const paths = resolveArenaPaths(gitRoot, name);
+  const config = await loadArenaConfig(paths.configPath);
+  const requirementsContent = await import('../utils/files').then(m => m.readTextFile(paths.requirementsPath));
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   const workspaces = buildVariantWorkspaces(paths, config.variants);
 
@@ -53,16 +46,32 @@ export const loadRuntimeContext = async (
   };
 };
 
+export interface InitOptions {
+  configSource?: string | undefined;
+  requirementsSource?: string | undefined;
+  arenaName?: string | undefined;
+}
+
 export const initializeArena = async (
   gitRoot: string,
-  configSource: string,
-  requirementsSource: string,
+  options: InitOptions,
   logger: Logger
 ): Promise<ArenaRuntimeContext> => {
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   await repository.verifyRepo(gitRoot);
 
-  const project = await ArenaProject.create(gitRoot, configSource, requirementsSource);
+  let project: ArenaProject;
+  if (options.configSource && options.requirementsSource) {
+    project = await ArenaProject.create(
+      gitRoot,
+      options.configSource,
+      options.requirementsSource,
+      options.arenaName
+    );
+  } else {
+    project = await ArenaProject.scaffold(gitRoot, options.arenaName);
+  }
+
   await repository.ensureGitignoreEntry(gitRoot, '.arena/');
 
   const { config, paths } = project;
