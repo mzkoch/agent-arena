@@ -12,7 +12,54 @@ Agent Arena must:
 
 ## Architecture Decisions
 
-### 1. Separate CLI from library modules
+### 1. `.arena/` project folder with same-repo worktrees
+
+All arena state lives in a single `.arena/` directory inside the user's project:
+
+```
+my-project/
+├── .arena/
+│   ├── arena.json              # config (copied at init)
+│   ├── requirements.md         # requirements doc (copied at init)
+│   ├── session.json            # IPC/session state
+│   ├── comparison-report.md    # evaluation output
+│   ├── logs/                   # agent logs
+│   └── worktrees/
+│       ├── variant-a/          # git worktree (branch: arena/variant-a)
+│       ├── variant-b/          # git worktree (branch: arena/variant-b)
+│       └── variant-c/          # git worktree (branch: arena/variant-c)
+├── src/
+├── package.json
+└── .gitignore                  # just add: .arena/
+```
+
+Worktrees are branches on the user's own repository (`arena/<name>`), not a separate repo. This means:
+
+- **One-line gitignore**: `.arena/` contains all artifacts
+- **Direct PRs**: `git merge arena/variant-a` or a GitHub PR from `arena/variant-a` → `main`
+- **Clean diffing**: `git diff main..arena/variant-a` works natively
+- **No copy step**: no need to copy files out of a separate repo
+
+### 2. ArenaProject abstraction
+
+`src/project/arena-project.ts` encapsulates the `.arena/` directory layout as a first-class object. It handles:
+
+- Creating new arena projects (copying config, creating directory structure)
+- Loading existing projects from config
+- Computing workspace paths for each variant
+- Managing `.gitignore` entries
+
+### 3. Zero-arg convention-over-configuration
+
+All CLI commands work with zero positional arguments when `.arena/arena.json` exists. The config discovery flow:
+
+1. Find the git root from the current working directory
+2. Look for `.arena/arena.json`
+3. Resolve all paths relative to the git root
+
+Optional `--config` and `--requirements` flags override auto-discovery.
+
+### 4. Separate CLI from library modules
 
 `src/cli.ts` is a thin Commander entry point. Everything important lives in testable modules under `src/`, including:
 
@@ -26,32 +73,20 @@ Agent Arena must:
 
 This keeps the CLI surface small and preserves clean seams for tests and future embedding.
 
-### 2. Dependency injection at the orchestration edge
+### 5. Dependency injection at the orchestration edge
 
 `ArenaOrchestrator` accepts injected PTY and process-termination implementations. That keeps the runtime platform-specific but lets tests run with fake PTYs and stub process management.
 
-### 3. PTY-first process management
+### 6. PTY-first process management
 
 The orchestrator is designed around PTYs rather than pipes so that interactive agent CLIs behave consistently:
 
 - Unix uses `node-pty` backed by the native PTY implementation
 - Windows uses `node-pty` backed by ConPTY
 
-This matches the product requirement that Windows must use a real pseudo console rather than a pipe fallback.
+### 7. Event-based state propagation
 
-### 4. Event-based state propagation
-
-The orchestrator emits:
-
-- full agent state updates
-- incremental output chunks
-
-The same event model feeds both:
-
-- the local Ink TUI
-- the IPC server for headless monitoring
-
-That keeps the monitor client and the local dashboard aligned around one state contract.
+The orchestrator emits full agent state updates and incremental output chunks. The same event model feeds both the local Ink TUI and the IPC server for headless monitoring.
 
 ## Module Layout
 
@@ -65,6 +100,7 @@ src/
   git/                       command runner and git worktree utilities
   ipc/                       NDJSON protocol, TCP server/client, session file helpers
   orchestrator/              PTY lifecycle, idle detection, kill/restart logic
+  project/                   ArenaProject abstraction for .arena/ directory layout
   prompt/                    per-worktree instructions and prompts
   providers/                 built-in providers, overrides, trusted folder helpers
   tui/                       Ink app, views, adapters, and state reducers
@@ -84,7 +120,7 @@ src/
 
 ### Paths
 
-All path construction uses Node's `path` utilities. Worktree and session paths are resolved from the config file location so relative configs behave predictably.
+All path construction uses Node's `path` utilities. Worktree and session paths are resolved from the git root so relative configs behave predictably.
 
 ### Line endings
 
@@ -117,26 +153,26 @@ Encoding: newline-delimited JSON (NDJSON).
 
 ### Session file
 
-The headless launcher writes `.arena-session.json` in the arena repo root:
+The headless launcher writes `.arena/session.json`:
 
 ```json
 {
   "port": 12345,
   "pid": 99999,
   "startedAt": "2026-01-01T00:00:00.000Z",
-  "repoPath": "/path/to/repo",
+  "gitRoot": "/path/to/project",
   "variants": ["alpha", "beta"]
 }
 ```
 
-### Server → client
+### Server to client
 
 - `snapshot`
 - `agent-output`
 - `agent-state`
 - `error`
 
-### Client → server
+### Client to server
 
 - `input`
 - `kill`
@@ -153,7 +189,7 @@ Evaluation is intentionally lightweight and deterministic:
 - `README.md` present
 - `DESIGN.md` present
 
-The scorer produces a simple recommendation and writes `comparison-report.md`.
+The scorer produces a simple recommendation and writes `.arena/comparison-report.md`.
 
 ## Trade-offs
 

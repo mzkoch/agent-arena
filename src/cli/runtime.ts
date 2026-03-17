@@ -1,12 +1,13 @@
 import { access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { ArenaConfig, ArenaPaths, ArenaSessionFile, Logger, VariantWorkspace } from '../domain/types';
-import { loadArenaConfig, resolveArenaPaths } from '../config/load';
+import { discoverArenaConfig, findGitRoot, loadArenaConfig, resolveArenaPaths } from '../config/load';
 import { buildArenaInstructions } from '../prompt/builder';
 import { ProviderRegistry } from '../providers/registry';
 import { readTextFile } from '../utils/files';
 import { NodeCommandRunner } from '../git/command-runner';
 import { GitRepositoryManager, buildVariantWorkspaces } from '../git/repository';
+import { ArenaProject } from '../project/arena-project';
 
 const exists = async (value: string): Promise<boolean> => {
   try {
@@ -26,12 +27,19 @@ export interface ArenaRuntimeContext {
 }
 
 export const loadRuntimeContext = async (
-  configPath: string,
-  requirementsPath: string,
+  configPath: string | undefined,
+  requirementsPath: string | undefined,
   logger: Logger
 ): Promise<ArenaRuntimeContext> => {
-  const config = await loadArenaConfig(configPath);
-  const paths = resolveArenaPaths(configPath, requirementsPath, config);
+  const resolvedConfigPath = configPath ?? await discoverArenaConfig();
+  const config = await loadArenaConfig(resolvedConfigPath);
+
+  const gitRoot = await findGitRoot(path.dirname(resolvedConfigPath));
+
+  const resolvedRequirementsPath = requirementsPath
+    ?? path.join(path.dirname(resolvedConfigPath), 'requirements.md');
+
+  const paths = resolveArenaPaths(gitRoot, resolvedConfigPath, resolvedRequirementsPath);
   const requirementsContent = await readTextFile(paths.requirementsPath);
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   const workspaces = buildVariantWorkspaces(paths, config.variants);
@@ -45,23 +53,44 @@ export const loadRuntimeContext = async (
   };
 };
 
-export const initializeArena = async (context: ArenaRuntimeContext): Promise<void> => {
-  await context.repository.initRepo(context.paths.repoPath);
+export const initializeArena = async (
+  gitRoot: string,
+  configSource: string,
+  requirementsSource: string,
+  logger: Logger
+): Promise<ArenaRuntimeContext> => {
+  const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
+  await repository.verifyRepo(gitRoot);
 
-  const registry = new ProviderRegistry(context.config.providers);
-  for (const workspace of context.workspaces) {
-    await context.repository.createWorktree(
-      context.paths.repoPath,
+  const project = await ArenaProject.create(gitRoot, configSource, requirementsSource);
+  await repository.ensureGitignoreEntry(gitRoot, '.arena/');
+
+  const { config, paths } = project;
+  const workspaces = project.workspaces;
+  const requirementsContent = await project.readRequirements();
+
+  const registry = new ProviderRegistry(config.providers);
+  for (const workspace of workspaces) {
+    await repository.createWorktree(
+      gitRoot,
       workspace.variant.branch,
       workspace.worktreePath
     );
     const provider = registry.get(workspace.variant.provider);
-    await context.repository.writeVariantFiles(
+    await repository.writeVariantFiles(
       workspace,
-      context.requirementsContent,
+      requirementsContent,
       buildArenaInstructions(workspace.variant, provider.completionProtocol)
     );
   }
+
+  return {
+    config,
+    paths,
+    workspaces,
+    requirementsContent,
+    repository
+  };
 };
 
 export const removeSessionFile = async (sessionFilePath: string): Promise<void> => {
@@ -70,8 +99,8 @@ export const removeSessionFile = async (sessionFilePath: string): Promise<void> 
 
 export const ensureSessionFile = (paths: ArenaPaths, session: ArenaSessionFile): ArenaSessionFile => ({
   ...session,
-  repoPath: path.resolve(paths.repoPath)
+  gitRoot: path.resolve(paths.gitRoot)
 });
 
 export const isArenaInitialized = async (paths: ArenaPaths): Promise<boolean> =>
-  exists(path.join(paths.repoPath, '.git'));
+  exists(paths.arenaDir);

@@ -7,13 +7,13 @@ import { readSessionFile, writeSessionFile } from './session-file';
 describe('session file helpers', () => {
   it('writes and reads session files', async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-session-'));
-    const filePath = path.join(tempDir, '.arena-session.json');
+    const filePath = path.join(tempDir, 'session.json');
 
     await writeSessionFile(filePath, {
       port: 1234,
       pid: 999,
       startedAt: new Date(0).toISOString(),
-      repoPath: '/tmp/repo',
+      gitRoot: '/tmp/project',
       variants: ['a']
     });
 
@@ -22,8 +22,8 @@ describe('session file helpers', () => {
 
   it('reads existing session JSON', async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-session-'));
-    const filePath = path.join(tempDir, '.arena-session.json');
-    await writeFile(filePath, '{"port":1,"pid":2,"startedAt":"x","repoPath":"y","variants":[]}\n');
-    expect((await readSessionFile(filePath)).repoPath).toBe('y');
+    const filePath = path.join(tempDir, 'session.json');
+    await writeFile(filePath, '{"port":1,"pid":2,"startedAt":"x","gitRoot":"y","variants":[]}\n');
+    expect((await readSessionFile(filePath)).gitRoot).toBe('y');
   });
 });

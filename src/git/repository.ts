@@ -1,4 +1,4 @@
-import { access, readdir, realpath } from 'node:fs/promises';
+import { access, readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { ArenaPaths, Logger, VariantConfig, VariantWorkspace } from '../domain/types';
 import { ensureDir, writeTextFile } from '../utils/files';
@@ -54,20 +54,18 @@ export class GitRepositoryManager {
     private readonly logger: Logger
   ) {}
 
-  public async initRepo(repoPath: string): Promise<void> {
-    await ensureDir(repoPath);
-    if (!(await exists(path.join(repoPath, '.git')))) {
-      const result = await this.runner.run('git', ['init', repoPath]);
-      if (result.exitCode !== 0) {
-        throw new Error(`Failed to initialize git repository at ${repoPath}: ${result.stderr || result.stdout}`.trim());
-      }
-      this.logger.info('Initialized git repository', { repoPath });
+  public async verifyRepo(gitRoot: string): Promise<void> {
+    if (!(await exists(path.join(gitRoot, '.git')))) {
+      throw new Error(
+        `No git repository found at ${gitRoot}. Arena requires an existing git repository.`
+      );
     }
 
-    if (!(await hasCommit(this.runner, repoPath))) {
+    if (!(await hasCommit(this.runner, gitRoot))) {
+      this.logger.info('No commits found, creating initial commit', { gitRoot });
       await ensureSuccess(
         this.runner,
-        repoPath,
+        gitRoot,
         [
           '-c',
           'user.name=Agent Arena',
@@ -81,10 +79,12 @@ export class GitRepositoryManager {
         'Failed to create initial commit'
       );
     }
+
+    this.logger.info('Verified git repository', { gitRoot });
   }
 
   public async createWorktree(
-    repoPath: string,
+    gitRoot: string,
     branch: string,
     worktreePath: string
   ): Promise<void> {
@@ -92,8 +92,10 @@ export class GitRepositoryManager {
       return;
     }
 
+    await ensureDir(path.dirname(worktreePath));
+
     const args = ['worktree', 'add'];
-    if (!(await branchExists(this.runner, repoPath, branch))) {
+    if (!(await branchExists(this.runner, gitRoot, branch))) {
       args.push('-b', branch, worktreePath);
     } else {
       args.push(worktreePath, branch);
@@ -101,29 +103,29 @@ export class GitRepositoryManager {
 
     await ensureSuccess(
       this.runner,
-      repoPath,
+      gitRoot,
       args,
       `Failed to create worktree ${worktreePath}`
     );
   }
 
-  public async removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
+  public async removeWorktree(gitRoot: string, worktreePath: string): Promise<void> {
     await ensureSuccess(
       this.runner,
-      repoPath,
+      gitRoot,
       ['worktree', 'remove', '--force', worktreePath],
       `Failed to remove worktree ${worktreePath}`
     );
   }
 
-  public async pruneWorktrees(repoPath: string): Promise<void> {
-    await ensureSuccess(this.runner, repoPath, ['worktree', 'prune'], 'Failed to prune worktrees');
+  public async pruneWorktrees(gitRoot: string): Promise<void> {
+    await ensureSuccess(this.runner, gitRoot, ['worktree', 'prune'], 'Failed to prune worktrees');
   }
 
-  public async listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
+  public async listWorktrees(gitRoot: string): Promise<WorktreeInfo[]> {
     const stdout = await ensureSuccess(
       this.runner,
-      repoPath,
+      gitRoot,
       ['worktree', 'list', '--porcelain'],
       'Failed to list worktrees'
     );
@@ -148,7 +150,6 @@ export class GitRepositoryManager {
       worktrees.push({ path: currentPath, branch: currentBranch });
     }
 
-    // Resolve paths to canonical form (handles Windows short paths like RUNNER~1)
     return Promise.all(
       worktrees.map(async (wt) => ({
         ...wt,
@@ -169,17 +170,57 @@ export class GitRepositoryManager {
     );
   }
 
-  public async clean(repoPath: string): Promise<void> {
-    const worktrees = await this.listWorktrees(repoPath);
-    const repoRealPath = await realpath(repoPath);
+  public async deleteBranch(gitRoot: string, branch: string): Promise<void> {
+    if (await branchExists(this.runner, gitRoot, branch)) {
+      await ensureSuccess(
+        this.runner,
+        gitRoot,
+        ['branch', '-D', branch],
+        `Failed to delete branch ${branch}`
+      );
+    }
+  }
+
+  public async clean(gitRoot: string, branches?: string[]): Promise<void> {
+    const worktrees = await this.listWorktrees(gitRoot);
+    const gitRootReal = await realpath(gitRoot);
+    const arenaWorktreeDir = path.join(gitRootReal, '.arena', 'worktrees');
 
     for (const worktree of worktrees) {
-      if ((await realpath(worktree.path)) !== repoRealPath) {
-        await this.removeWorktree(repoPath, worktree.path);
+      const worktreeReal = await realpath(worktree.path);
+      const isArenaManaged =
+        worktreeReal.startsWith(`${arenaWorktreeDir}${path.sep}`) ||
+        worktree.branch.startsWith('arena/');
+
+      if (worktreeReal !== gitRootReal && isArenaManaged) {
+        await this.removeWorktree(gitRoot, worktree.path);
       }
     }
 
-    await this.pruneWorktrees(repoPath);
+    await this.pruneWorktrees(gitRoot);
+
+    if (branches) {
+      for (const branch of branches) {
+        await this.deleteBranch(gitRoot, branch);
+      }
+    }
+  }
+
+  public async ensureGitignoreEntry(gitRoot: string, entry: string): Promise<void> {
+    const gitignorePath = path.join(gitRoot, '.gitignore');
+
+    let content = '';
+    if (await exists(gitignorePath)) {
+      content = await readFile(gitignorePath, 'utf8');
+      const lines = content.split(/\r?\n/);
+      if (lines.some((line) => line.trim() === entry)) {
+        return;
+      }
+    }
+
+    const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
+    const prefix = content.length > 0 ? `${separator}\n# Arena\n` : '# Arena\n';
+    await writeTextFile(gitignorePath, `${content}${prefix}${entry}\n`);
   }
 }
 

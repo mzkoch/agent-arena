@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    exclude: ['**/node_modules/**', '**/agent-arena-v2*/**'],
+    exclude: ['**/node_modules/**', '**/.arena/**', '**/agent-arena-v2*/**', '**/issue-5-arena*/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

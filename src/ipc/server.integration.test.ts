@@ -20,7 +20,7 @@ describe('ArenaIpcServer + ArenaIpcClient', () => {
       snapshotProvider: () => ({
         type: 'snapshot',
         snapshot: {
-          repoPath: '/tmp/repo',
+          gitRoot: '/tmp/project',
           startedAt: new Date(0).toISOString(),
           headless: true,
           agents: []
@@ -41,7 +41,7 @@ describe('ArenaIpcServer + ArenaIpcClient', () => {
     });
 
     const snapshot = await client.connect(port);
-    expect(snapshot.snapshot.repoPath).toBe('/tmp/repo');
+    expect(snapshot.snapshot.gitRoot).toBe('/tmp/project');
 
     server.broadcast({ type: 'agent-output', agent: 'alpha', chunk: 'hello' });
     client.send({ type: 'input', agent: 'alpha', data: 'world' });

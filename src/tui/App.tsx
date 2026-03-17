@@ -44,7 +44,7 @@ const toPtyInput = (input: string, key: { [key: string]: boolean | undefined }):
 export interface AppProps {
   controller: ArenaController;
   title: string;
-  onExit?: () => Promise<void> | void;
+  onExit?: (() => Promise<void> | void) | undefined;
 }
 
 export const App = ({ controller, title, onExit }: AppProps): React.JSX.Element => {

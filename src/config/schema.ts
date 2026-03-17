@@ -56,10 +56,9 @@ export const variantConfigSchema = z.object({
 
 export const arenaConfigSchema = z
   .object({
-    repoName: z.string().min(1),
+    repoName: z.string().min(1).optional(),
     maxContinues: z.number().int().positive().default(50),
     agentTimeoutMs: z.number().int().positive().default(3_600_000),
-    worktreeDir: z.string().min(1).optional(),
     providers: z.record(z.string(), providerConfigSchema).default({}),
     variants: z.array(variantConfigSchema).min(1, 'At least one variant is required.')
   })

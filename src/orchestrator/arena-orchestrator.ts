@@ -52,7 +52,7 @@ export class ArenaOrchestrator extends EventEmitter<{
   public constructor(
     private readonly config: ArenaConfig,
     private readonly workspaces: VariantWorkspace[],
-    private readonly repoPath: string,
+    private readonly gitRoot: string,
     private readonly logger: Logger,
     private readonly dependencies: OrchestratorDependencies = {}
   ) {
@@ -86,7 +86,7 @@ export class ArenaOrchestrator extends EventEmitter<{
 
   public getSnapshot(headless = false): ArenaSnapshot {
     return {
-      repoPath: this.repoPath,
+      gitRoot: this.gitRoot,
       startedAt: new Date(this.startedAt).toISOString(),
       headless,
       agents: [...this.agents.values()].map((agent) => this.toAgentSnapshot(agent))

@@ -43,10 +43,9 @@ export interface VariantConfig {
 }
 
 export interface ArenaConfig {
-  repoName: string;
+  repoName?: string | undefined;
   maxContinues: number;
   agentTimeoutMs: number;
-  worktreeDir?: string | undefined;
   providers: Record<string, ProviderConfig>;
   variants: VariantConfig[];
 }
@@ -54,9 +53,12 @@ export interface ArenaConfig {
 export interface ArenaPaths {
   configPath: string;
   requirementsPath: string;
-  repoPath: string;
+  gitRoot: string;
+  arenaDir: string;
   worktreeDir: string;
   sessionFilePath: string;
+  logDir: string;
+  reportPath: string;
 }
 
 export interface VariantWorkspace {
@@ -84,7 +86,7 @@ export interface AgentSnapshot {
 }
 
 export interface ArenaSnapshot {
-  repoPath: string;
+  gitRoot: string;
   startedAt: string;
   headless: boolean;
   agents: AgentSnapshot[];
@@ -94,7 +96,7 @@ export interface ArenaSessionFile {
   port: number;
   pid: number;
   startedAt: string;
-  repoPath: string;
+  gitRoot: string;
   variants: string[];
 }
 
@@ -111,7 +113,7 @@ export interface EvaluationVariantMetrics {
 
 export interface EvaluationReport {
   generatedAt: string;
-  repoPath: string;
+  gitRoot: string;
   winner: string;
   variants: EvaluationVariantMetrics[];
   markdown: string;
