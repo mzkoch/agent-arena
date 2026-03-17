@@ -2,6 +2,7 @@ import { access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { ArenaConfig, ArenaPaths, ArenaSessionFile, Logger, VariantWorkspace } from '../domain/types';
 import { findGitRoot, resolveArenaPaths, resolveArenaName, loadArenaConfig } from '../config/load';
+import { readTextFile } from '../utils/files';
 import { buildArenaInstructions } from '../prompt/builder';
 import { ProviderRegistry } from '../providers/registry';
 import { NodeCommandRunner } from '../git/command-runner';
@@ -32,8 +33,8 @@ export const loadRuntimeContext = async (
   const gitRoot = await findGitRoot();
   const name = await resolveArenaName(gitRoot, arenaName);
   const paths = resolveArenaPaths(gitRoot, name);
-  const config = await loadArenaConfig(paths.configPath);
-  const requirementsContent = await import('../utils/files').then(m => m.readTextFile(paths.requirementsPath));
+  const config = await loadArenaConfig(paths.configPath, name);
+  const requirementsContent = await readTextFile(paths.requirementsPath);
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   const workspaces = buildVariantWorkspaces(paths, config.variants);
 
@@ -60,12 +61,21 @@ export const initializeArena = async (
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   await repository.verifyRepo(gitRoot);
 
+  const hasBothSources = Boolean(options.configSource) && Boolean(options.requirementsSource);
+  const hasEitherSource = Boolean(options.configSource) || Boolean(options.requirementsSource);
+
+  if (hasEitherSource && !hasBothSources) {
+    throw new Error(
+      'Both configSource and requirementsSource must be provided together, or omit both to scaffold a new arena.'
+    );
+  }
+
   let project: ArenaProject;
-  if (options.configSource && options.requirementsSource) {
+  if (hasBothSources) {
     project = await ArenaProject.create(
       gitRoot,
-      options.configSource,
-      options.requirementsSource,
+      options.configSource!,
+      options.requirementsSource!,
       options.arenaName
     );
   } else {

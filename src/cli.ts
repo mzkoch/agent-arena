@@ -16,7 +16,6 @@ import { hasActiveAgents } from './tui/state';
 import {
   ensureSessionFile,
   initializeArena,
-  isArenaInitialized,
   loadRuntimeContext,
   removeSessionFile
 } from './cli/runtime';
@@ -116,12 +115,6 @@ program
   .action(async (name: string | undefined, options: { headless?: boolean }) => {
     const logger = createLogger(Boolean(program.opts().verbose));
     const context = await loadRuntimeContext(name, logger);
-
-    if (!(await isArenaInitialized(context.paths))) {
-      throw new Error(
-        'Arena not initialized. Run "arena init" first.'
-      );
-    }
 
     const orchestrator = new ArenaOrchestrator(
       context.config,

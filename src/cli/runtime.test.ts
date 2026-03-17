@@ -146,3 +146,58 @@ describe('cli runtime helpers', () => {
     await expect(access(sessionFile)).rejects.toThrow();
   });
 });
+
+  it('throws when only configSource is provided without requirementsSource', async () => {
+    const gitRoot = await createGitRepo();
+    const configPath = path.join(gitRoot, 'arena.json');
+
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        variants: [
+          {
+            name: 'alpha',
+            model: 'gpt-5',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Composable'
+          }
+        ]
+      })
+    );
+
+    await expect(
+      initializeArena(gitRoot, { configSource: configPath }, logger)
+    ).rejects.toThrow('Both configSource and requirementsSource must be provided together');
+  });
+
+  it('loads runtime context for a named arena', async () => {
+    const gitRoot = await createGitRepo();
+    const arenaDir = path.join(gitRoot, '.arena', 'my-experiment');
+    await mkdir(arenaDir, { recursive: true });
+
+    await writeFile(
+      path.join(arenaDir, 'arena.json'),
+      JSON.stringify({
+        variants: [
+          {
+            name: 'gamma',
+            model: 'gpt-5',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Simple'
+          }
+        ]
+      })
+    );
+    await writeFile(path.join(arenaDir, 'requirements.md'), '# Named');
+
+    const origCwd = process.cwd();
+    process.chdir(gitRoot);
+    try {
+      const context = await loadRuntimeContext('my-experiment', logger);
+      expect(context.config.variants[0]!.name).toBe('gamma');
+      expect(context.config.variants[0]!.branch).toBe('arena/my-experiment/gamma');
+      expect(context.paths.arenaName).toBe('my-experiment');
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
