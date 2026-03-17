@@ -8,6 +8,11 @@ class Arena < Formula
 
   def install
     system "npm", "install", *std_npm_args
+    system "npm", "run", "build"
+    # Install the built artifacts alongside the npm package
+    libexec.install Dir["dist/*"]
+    libexec.install "bin/arena.cjs"
+    (bin/"arena").write_env_script libexec/"arena.cjs", PATH: "#{Formula["node"].opt_bin}:$PATH"
   end
 
   test do

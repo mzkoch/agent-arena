@@ -37,6 +37,15 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 
 curl -fsSL "${URL}" -o "${TMP_DIR}/${ASSET}"
 tar -xzf "${TMP_DIR}/${ASSET}" -C "${TMP_DIR}"
-install -m 0755 "${TMP_DIR}/arena" "${INSTALL_DIR}/arena"
+
+# Detect if INSTALL_DIR is writable; prompt for sudo if not
+if [[ -w "${INSTALL_DIR}" ]]; then
+  install -m 0755 "${TMP_DIR}/arena" "${INSTALL_DIR}/arena"
+else
+  echo "Note: ${INSTALL_DIR} requires elevated permissions."
+  echo "  Override with: ARENA_INSTALL_DIR=~/.local/bin bash install.sh"
+  echo ""
+  sudo install -m 0755 "${TMP_DIR}/arena" "${INSTALL_DIR}/arena"
+fi
 
 echo "Installed arena to ${INSTALL_DIR}/arena"

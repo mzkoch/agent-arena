@@ -5,7 +5,7 @@ const runCommand = async (command: string, args: string[]): Promise<void> =>
     const child = spawn(command, args, { stdio: 'ignore' });
     child.on('error', reject);
     child.on('close', (code) => {
-      if (code && code !== 0) {
+      if (code !== 0) {
         reject(new Error(`${command} exited with code ${code}`));
         return;
       }

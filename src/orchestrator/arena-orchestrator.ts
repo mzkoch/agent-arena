@@ -179,7 +179,7 @@ export class ArenaOrchestrator extends EventEmitter<{
     await Promise.all(
       [...this.agents.keys()].map(async (agentName) => {
         const agent = this.getAgent(agentName);
-        if (agent.process && agent.pid && (agent.status === 'running' || agent.status === 'idle')) {
+        if (agent.process && agent.pid) {
           await this.killAgent(agentName);
         }
       })
@@ -232,7 +232,7 @@ export class ArenaOrchestrator extends EventEmitter<{
     const plainChunk = stripAnsi(chunk);
 
     if (plainChunk.includes(provider.completionProtocol.doneMarker)) {
-      this.completeAgent(agentName, 0);
+      void this.completeAgent(agentName, 0);
       return;
     }
 
@@ -268,7 +268,7 @@ export class ArenaOrchestrator extends EventEmitter<{
       if (agent.status !== 'completed' && agent.status !== 'failed' && agent.status !== 'killed') {
         agent.checksPerformed += 1;
         if (agent.checksPerformed >= provider.completionProtocol.maxChecks) {
-          this.completeAgent(agentName, agent.exitCode ?? 0);
+          void this.completeAgent(agentName, agent.exitCode ?? 0);
           return;
         }
 
@@ -291,18 +291,29 @@ export class ArenaOrchestrator extends EventEmitter<{
     }
 
     if (exitCode === 0) {
-      this.completeAgent(agentName, exitCode);
+      void this.completeAgent(agentName, exitCode);
       return;
     }
 
     void this.failAgent(agentName, `Agent exited with code ${exitCode}`, exitCode);
   }
 
-  private completeAgent(agentName: string, exitCode: number): void {
+  private async completeAgent(agentName: string, exitCode: number): Promise<void> {
     const agent = this.getAgent(agentName);
     agent.exitCode = exitCode;
     agent.completedAt = this.now();
     this.clearTimers(agent);
+
+    // Terminate the PTY process to prevent child process leaks
+    if (agent.process && agent.pid) {
+      try {
+        await this.processTerminator(agent.pid);
+        agent.process.kill();
+      } catch {
+        this.logger.warn('Failed to terminate completed agent process', { agent: agentName, pid: agent.pid });
+      }
+    }
+
     this.setStatus(agent, 'completed');
   }
 

@@ -99,7 +99,10 @@ describe('ArenaOrchestrator', () => {
     expect(fakePty.writes[0]).toMatch(/Read REQUIREMENTS\.md/);
 
     fakePty.emitData('working\nDONE\n');
-    expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+    // completeAgent is async — allow the termination promise to resolve
+    await vi.waitFor(() => {
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+    });
 
     await orchestrator.restartAgent('alpha');
     await orchestrator.killAgent('alpha');

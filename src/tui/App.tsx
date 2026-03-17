@@ -9,6 +9,13 @@ import { applyServerMessage, hasActiveAgents } from './state';
 type ViewMode = 'dashboard' | 'detail';
 
 const toPtyInput = (input: string, key: { [key: string]: boolean | undefined }): string => {
+  if (key.ctrl) {
+    const code = input.toLowerCase().charCodeAt(0);
+    // Map Ctrl+A through Ctrl+Z to ASCII control characters 0x01–0x1A
+    if (code >= 97 && code <= 122) {
+      return String.fromCharCode(code - 96);
+    }
+  }
   if (key.return) {
     return '\r';
   }

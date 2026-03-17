@@ -22,10 +22,23 @@ export class ArenaIpcServer {
 
       const parser = new NdjsonParser<ClientToServerMessage>();
       socket.on('data', (chunk: string) => {
-        void Promise.resolve(this.handleIncomingMessages(parser.push(chunk))).catch((error: unknown) => {
+        let messages: ClientToServerMessage[];
+        try {
+          messages = parser.push(chunk);
+        } catch (parseError: unknown) {
+          const message = parseError instanceof Error ? parseError.message : String(parseError);
+          this.options.logger.warn('Malformed IPC message from client', { error: message });
+          socket.write(serializeNdjsonMessage({ type: 'error', message: `Bad request: ${message}` }));
+          return;
+        }
+        void Promise.resolve(this.handleIncomingMessages(messages)).catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
           socket.write(serializeNdjsonMessage({ type: 'error', message }));
         });
+      });
+      socket.on('error', (error) => {
+        this.options.logger.warn('IPC socket error', { error: error.message });
+        this.sockets.delete(socket);
       });
       socket.on('close', () => {
         this.sockets.delete(socket);
