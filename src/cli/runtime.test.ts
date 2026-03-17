@@ -54,7 +54,7 @@ describe('cli runtime helpers', () => {
     expect(context.paths.arenaDir).toBe(path.join(gitRoot, '.arena', 'default'));
     expect(context.paths.arenaName).toBe('default');
     expect(context.workspaces).toHaveLength(1);
-    expect(context.workspaces[0]!.variant.branch).toBe('arena/alpha');
+    expect(context.workspaces[0]!.variant.branch).toBe('arena/default/alpha');
 
     const worktreeRequirements = await readFile(
       path.join(context.workspaces[0]!.worktreePath, 'REQUIREMENTS.md'),

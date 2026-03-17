@@ -43,7 +43,7 @@ describe('ArenaProject', () => {
     expect(project.paths.arenaDir).toBe(path.join(gitRoot, '.arena', 'default'));
     expect(project.paths.arenaName).toBe('default');
     expect(project.config.variants).toHaveLength(1);
-    expect(project.config.variants[0]!.branch).toBe('arena/alpha');
+    expect(project.config.variants[0]!.branch).toBe('arena/default/alpha');
 
     await access(path.join(gitRoot, '.arena', 'default', 'arena.json'));
     await access(path.join(gitRoot, '.arena', 'default', 'requirements.md'));

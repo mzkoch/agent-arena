@@ -28,15 +28,15 @@ const normalizeVariant = (variant: {
   techStack: string;
   designPhilosophy: string;
   branch?: string | undefined;
-}): VariantConfig => ({
+}, arenaName: string): VariantConfig => ({
   ...variant,
-  branch: variant.branch ?? `arena/${variant.name}`
+  branch: variant.branch ?? `arena/${arenaName}/${variant.name}`
 });
 
-export const loadArenaConfig = async (configPath: string): Promise<ArenaConfig> => {
+export const loadArenaConfig = async (configPath: string, arenaName: string = DEFAULT_ARENA_NAME): Promise<ArenaConfig> => {
   const raw = await readJsonFile<unknown>(configPath);
   const parsed = arenaConfigSchema.parse(raw);
-  const normalizedVariants = parsed.variants.map(normalizeVariant);
+  const normalizedVariants = parsed.variants.map((v) => normalizeVariant(v, arenaName));
 
   return {
     repoName: parsed.repoName,

@@ -40,7 +40,7 @@ export class ArenaProject {
     await copyFile(path.resolve(configSource), paths.configPath);
     await copyFile(path.resolve(requirementsSource), paths.requirementsPath);
 
-    const config = await loadArenaConfig(paths.configPath);
+    const config = await loadArenaConfig(paths.configPath, name);
 
     return new ArenaProject(
       resolveArenaPaths(gitRoot, name),
@@ -78,7 +78,7 @@ export class ArenaProject {
     await writeTextFile(paths.configPath, defaultConfig);
     await writeTextFile(paths.requirementsPath, defaultRequirements);
 
-    const config = await loadArenaConfig(paths.configPath);
+    const config = await loadArenaConfig(paths.configPath, name);
     return new ArenaProject(paths, config);
   }
 
@@ -88,7 +88,7 @@ export class ArenaProject {
   ): Promise<ArenaProject> {
     const name = await resolveArenaName(gitRoot, arenaName);
     const paths = resolveArenaPaths(gitRoot, name);
-    const config = await loadArenaConfig(paths.configPath);
+    const config = await loadArenaConfig(paths.configPath, name);
     return new ArenaProject(paths, config);
   }
 

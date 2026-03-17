@@ -31,7 +31,7 @@ describe('loadArenaConfig', () => {
     expect(config.agentTimeoutMs).toBe(3_600_000);
     expect(config.variants[0]).toMatchObject({
       provider: 'copilot-cli',
-      branch: 'arena/node-cli'
+      branch: 'arena/default/node-cli'
     });
   });
 
