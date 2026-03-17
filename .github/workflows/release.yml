@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate
+        run: npm run validate
+
+      - name: Publish package
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  build-binaries:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: node20-linux-x64
+            archive: arena-linux-amd64.tar.gz
+          - os: ubuntu-latest
+            target: node20-linux-arm64
+            archive: arena-linux-arm64.tar.gz
+          - os: macos-latest
+            target: node20-macos-x64
+            archive: arena-darwin-amd64.tar.gz
+          - os: macos-latest
+            target: node20-macos-arm64
+            archive: arena-darwin-arm64.tar.gz
+          - os: windows-latest
+            target: node20-win-x64
+            archive: arena-windows-amd64.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build bundle
+        run: npm run build
+
+      - name: Package binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p release
+          npx pkg dist/cli.js --targets "${{ matrix.target }}" --output release/arena
+          tar -C release -czf "release/${{ matrix.archive }}" arena
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          npx pkg dist/cli.js --targets "${{ matrix.target }}" --output release/arena.exe
+          Compress-Archive -Path release/arena.exe -DestinationPath "release/${{ matrix.archive }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: release/${{ matrix.archive }}
+
+  github-release:
+    runs-on: ubuntu-latest
+    needs:
+      - publish-npm
+      - build-binaries
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/**/*
