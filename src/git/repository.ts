@@ -148,7 +148,13 @@ export class GitRepositoryManager {
       worktrees.push({ path: currentPath, branch: currentBranch });
     }
 
-    return worktrees;
+    // Resolve paths to canonical form (handles Windows short paths like RUNNER~1)
+    return Promise.all(
+      worktrees.map(async (wt) => ({
+        ...wt,
+        path: await realpath(wt.path)
+      }))
+    );
   }
 
   public async writeVariantFiles(
