@@ -106,4 +106,25 @@ describe('GitRepositoryManager', () => {
 
     await expect(manager.verifyRepo(tempDir)).rejects.toThrow(/no git repository/i);
   });
+
+  it('clean preserves non-arena worktrees', async () => {
+    const gitRoot = await createGitRepo();
+    const manager = new GitRepositoryManager(new NodeCommandRunner(), silentLogger);
+
+    const arenaWorktree = path.join(gitRoot, '.arena', 'worktrees', 'gamma');
+    await manager.createWorktree(gitRoot, 'arena/gamma', arenaWorktree);
+
+    const userWorktree = path.join(gitRoot, '..', 'user-feature');
+    await manager.createWorktree(gitRoot, 'feature/user-work', userWorktree);
+
+    const before = await manager.listWorktrees(gitRoot);
+    expect(before).toHaveLength(3);
+
+    await manager.clean(gitRoot, ['arena/gamma']);
+
+    const after = await manager.listWorktrees(gitRoot);
+    const canonicalUser = await realpath(userWorktree);
+    expect(after.some((entry) => entry.path === canonicalUser)).toBe(true);
+    expect(after.some((entry) => entry.branch === 'arena/gamma')).toBe(false);
+  });
 });

@@ -1,12 +1,13 @@
-import { access, copyFile, rm } from 'node:fs/promises';
+import { access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { ArenaConfig, ArenaPaths, ArenaSessionFile, Logger, VariantWorkspace } from '../domain/types';
 import { discoverArenaConfig, findGitRoot, loadArenaConfig, resolveArenaPaths } from '../config/load';
 import { buildArenaInstructions } from '../prompt/builder';
 import { ProviderRegistry } from '../providers/registry';
-import { readTextFile, ensureDir } from '../utils/files';
+import { readTextFile } from '../utils/files';
 import { NodeCommandRunner } from '../git/command-runner';
 import { GitRepositoryManager, buildVariantWorkspaces } from '../git/repository';
+import { ArenaProject } from '../project/arena-project';
 
 const exists = async (value: string): Promise<boolean> => {
   try {
@@ -61,22 +62,12 @@ export const initializeArena = async (
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   await repository.verifyRepo(gitRoot);
 
-  const arenaDir = path.join(gitRoot, '.arena');
-  await ensureDir(arenaDir);
-  await ensureDir(path.join(arenaDir, 'worktrees'));
-  await ensureDir(path.join(arenaDir, 'logs'));
-
-  const configDest = path.join(arenaDir, 'arena.json');
-  const requirementsDest = path.join(arenaDir, 'requirements.md');
-
-  await copyFile(path.resolve(configSource), configDest);
-  await copyFile(path.resolve(requirementsSource), requirementsDest);
+  const project = await ArenaProject.create(gitRoot, configSource, requirementsSource);
   await repository.ensureGitignoreEntry(gitRoot, '.arena/');
 
-  const config = await loadArenaConfig(configDest);
-  const paths = resolveArenaPaths(gitRoot, configDest, requirementsDest);
-  const workspaces = buildVariantWorkspaces(paths, config.variants);
-  const requirementsContent = await readTextFile(requirementsDest);
+  const { config, paths } = project;
+  const workspaces = project.workspaces;
+  const requirementsContent = await project.readRequirements();
 
   const registry = new ProviderRegistry(config.providers);
   for (const workspace of workspaces) {

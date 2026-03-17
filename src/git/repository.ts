@@ -62,6 +62,7 @@ export class GitRepositoryManager {
     }
 
     if (!(await hasCommit(this.runner, gitRoot))) {
+      this.logger.info('No commits found, creating initial commit', { gitRoot });
       await ensureSuccess(
         this.runner,
         gitRoot,
@@ -78,6 +79,8 @@ export class GitRepositoryManager {
         'Failed to create initial commit'
       );
     }
+
+    this.logger.info('Verified git repository', { gitRoot });
   }
 
   public async createWorktree(
@@ -181,9 +184,15 @@ export class GitRepositoryManager {
   public async clean(gitRoot: string, branches?: string[]): Promise<void> {
     const worktrees = await this.listWorktrees(gitRoot);
     const gitRootReal = await realpath(gitRoot);
+    const arenaWorktreeDir = path.join(gitRootReal, '.arena', 'worktrees');
 
     for (const worktree of worktrees) {
-      if ((await realpath(worktree.path)) !== gitRootReal) {
+      const worktreeReal = await realpath(worktree.path);
+      const isArenaManaged =
+        worktreeReal.startsWith(`${arenaWorktreeDir}${path.sep}`) ||
+        worktree.branch.startsWith('arena/');
+
+      if (worktreeReal !== gitRootReal && isArenaManaged) {
         await this.removeWorktree(gitRoot, worktree.path);
       }
     }
