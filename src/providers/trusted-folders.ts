@@ -31,8 +31,16 @@ export const ensureTrustedFolder = async (
     }
   } else {
     const { nestedKey } = provider.trustedFolders;
-    const existing = (config[jsonKey] ?? {}) as Record<string, Record<string, unknown>>;
-    const projectEntry = existing[folderPath] ?? {};
+    const raw = config[jsonKey];
+    const existing =
+      typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : {};
+    const rawEntry = existing[folderPath];
+    const projectEntry =
+      typeof rawEntry === 'object' && rawEntry !== null && !Array.isArray(rawEntry)
+        ? (rawEntry as Record<string, unknown>)
+        : {};
 
     if (projectEntry[nestedKey] !== true) {
       existing[folderPath] = { ...projectEntry, [nestedKey]: true };
