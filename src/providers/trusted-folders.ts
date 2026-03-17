@@ -1,4 +1,4 @@
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { mkdir, rm, stat, utimes } from 'node:fs/promises';
 import path from 'node:path';
 import type { ProviderConfig, TrustedFoldersConfig } from '../domain/types';
 import { ensureDir, expandHomeDir, readJsonFile, writeJsonFile } from '../utils/files';
@@ -7,6 +7,7 @@ const LOCK_SUFFIX = '.arena-lock';
 const LOCK_RETRY_DELAY_MS = 25;
 const LOCK_TIMEOUT_MS = 5_000;
 const LOCK_STALE_MS = 30_000;
+const LOCK_HEARTBEAT_MS = 5_000;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -18,6 +19,22 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const resolveConfigFilePath = (trustedFolders: TrustedFoldersConfig): string =>
   path.resolve(expandHomeDir(trustedFolders.configFile));
+
+/**
+ * Build a grouping key that includes the config file path AND the schema
+ * (strategy, jsonKey, nestedKey) so two providers targeting the same file
+ * with different layouts are never merged into a single batch.
+ */
+const buildGroupKey = (trustedFolders: TrustedFoldersConfig): string => {
+  const configFilePath = resolveConfigFilePath(trustedFolders);
+  const parts = [
+    configFilePath,
+    trustedFolders.strategy,
+    trustedFolders.jsonKey,
+    trustedFolders.strategy === 'nested-object' ? trustedFolders.nestedKey : ''
+  ];
+  return parts.join('\0');
+};
 
 const readConfigSafe = async (configFilePath: string): Promise<Record<string, unknown>> => {
   try {
@@ -37,9 +54,23 @@ const getLockAgeMs = async (lockPath: string): Promise<number | undefined> => {
 };
 
 /**
+ * Touch the lock directory's mtime to signal the lock is still actively held.
+ * This prevents other processes from treating a long-running but legitimate
+ * lock as stale.
+ */
+const startHeartbeat = (lockPath: string): NodeJS.Timeout => {
+  return setInterval(() => {
+    const now = new Date();
+    void utimes(lockPath, now, now).catch(() => {});
+  }, LOCK_HEARTBEAT_MS);
+};
+
+/**
  * Cross-process file lock using atomic mkdir. The lock directory is created
  * atomically; concurrent processes that try to mkdir the same path will get
- * EEXIST. Stale locks (older than LOCK_STALE_MS) are automatically removed.
+ * EEXIST. Stale locks (older than LOCK_STALE_MS with no heartbeat) are
+ * automatically removed. Active locks refresh their mtime via a heartbeat
+ * to prevent false stale detection.
  */
 export const withFileLock = async <T>(
   targetFilePath: string,
@@ -73,10 +104,14 @@ export const withFileLock = async <T>(
     }
   }
 
+  const heartbeat = startHeartbeat(lockPath);
   try {
     return await operation();
   } finally {
-    await rm(lockPath, { recursive: true, force: true });
+    clearInterval(heartbeat);
+    // Best-effort cleanup: swallow errors so the original operation
+    // error (if any) is not masked by a cleanup failure.
+    await rm(lockPath, { recursive: true, force: true }).catch(() => {});
   }
 };
 
@@ -175,25 +210,29 @@ export interface TrustedFolderRegistration {
 
 /**
  * Batch-register trusted folders for multiple providers. Groups entries
- * by resolved config file path so each file is read and written at most
- * once, then acquires a file lock for each group to prevent cross-process
- * races.
+ * by resolved config file path AND schema (strategy/jsonKey/nestedKey)
+ * so each unique combination is written independently. Acquires a file
+ * lock per config file for cross-process safety.
  */
 export const registerTrustedFolders = async (
   registrations: readonly TrustedFolderRegistration[]
 ): Promise<void> => {
-  const grouped = new Map<string, { trustedFolders: TrustedFoldersConfig; folderPaths: string[] }>();
+  const grouped = new Map<string, { trustedFolders: TrustedFoldersConfig; configFilePath: string; folderPaths: string[] }>();
 
   for (const { provider, folderPath } of registrations) {
     if (!provider.trustedFolders) {
       continue;
     }
 
-    const configFilePath = resolveConfigFilePath(provider.trustedFolders);
-    let group = grouped.get(configFilePath);
+    const key = buildGroupKey(provider.trustedFolders);
+    let group = grouped.get(key);
     if (!group) {
-      group = { trustedFolders: provider.trustedFolders, folderPaths: [] };
-      grouped.set(configFilePath, group);
+      group = {
+        trustedFolders: provider.trustedFolders,
+        configFilePath: resolveConfigFilePath(provider.trustedFolders),
+        folderPaths: []
+      };
+      grouped.set(key, group);
     }
     if (!group.folderPaths.includes(folderPath)) {
       group.folderPaths.push(folderPath);
@@ -201,7 +240,7 @@ export const registerTrustedFolders = async (
   }
 
   await Promise.all(
-    [...grouped.entries()].map(async ([configFilePath, { trustedFolders, folderPaths }]) =>
+    [...grouped.values()].map(async ({ trustedFolders, configFilePath, folderPaths }) =>
       withFileLock(configFilePath, async () => {
         const config = await readConfigSafe(configFilePath);
         if (applyTrustedFolderUpdate(config, trustedFolders, folderPaths)) {

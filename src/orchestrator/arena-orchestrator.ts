@@ -103,10 +103,20 @@ export class ArenaOrchestrator extends EventEmitter<{
       }))
     );
 
-    await Promise.all(this.workspaces.map(async (workspace) => this.startAgent(workspace.variant.name)));
+    // Launch without per-agent trust check — batch registration above covers all.
+    for (const workspace of this.workspaces) {
+      this.launchAgent(workspace.variant.name);
+    }
   }
 
   public async startAgent(agentName: string): Promise<void> {
+    const agent = this.getAgent(agentName);
+    const { variant, worktreePath } = agent.workspace;
+    await ensureTrustedFolder(this.registry.get(variant.provider), worktreePath);
+    this.launchAgent(agentName);
+  }
+
+  private launchAgent(agentName: string): void {
     const agent = this.getAgent(agentName);
     const { variant, worktreePath } = agent.workspace;
     const provider = this.registry.get(variant.provider);
@@ -116,8 +126,6 @@ export class ArenaOrchestrator extends EventEmitter<{
       buildLaunchPrompt(),
       this.config.maxContinues
     );
-
-    await ensureTrustedFolder(provider, worktreePath);
 
     agent.outputBuffer = new OutputBuffer();
     agent.checksPerformed = 0;
