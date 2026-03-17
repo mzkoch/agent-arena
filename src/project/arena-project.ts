@@ -1,8 +1,8 @@
 import { access, copyFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ArenaPaths, ArenaConfig, Logger, VariantWorkspace } from '../domain/types';
+import type { ArenaPaths, ArenaConfig, VariantWorkspace } from '../domain/types';
 import { loadArenaConfig, resolveArenaPaths, findGitRoot } from '../config/load';
-import { ensureDir, readTextFile, writeJsonFile, writeTextFile } from '../utils/files';
+import { ensureDir, readTextFile, writeTextFile } from '../utils/files';
 
 const exists = async (value: string): Promise<boolean> => {
   try {
