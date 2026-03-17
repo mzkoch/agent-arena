@@ -114,7 +114,7 @@ describe('GitRepositoryManager', () => {
     const arenaWorktree = path.join(gitRoot, '.arena', 'worktrees', 'gamma');
     await manager.createWorktree(gitRoot, 'arena/gamma', arenaWorktree);
 
-    const userWorktree = path.join(gitRoot, '..', 'user-feature');
+    const userWorktree = path.join(gitRoot, 'external-worktrees', 'user-feature');
     await manager.createWorktree(gitRoot, 'feature/user-work', userWorktree);
 
     const before = await manager.listWorktrees(gitRoot);

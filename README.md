@@ -207,11 +207,21 @@ Custom providers can override built-ins or define new ones:
         "responseTimeoutMs": 60000,
         "doneMarker": "ARENA_DONE",
         "continueMarker": "ARENA_CONTINUING"
+      },
+      "trustedFolders": {
+        "strategy": "flat-array",
+        "configFile": "~/.my-agent/config.json",
+        "jsonKey": "trusted_folders"
       }
     }
   }
 }
 ```
+
+The `trustedFolders` field is optional. When set, the arena pre-registers each worktree directory in the provider's config file before launching the agent, preventing interactive trust dialogs. Two strategies are supported:
+
+- `flat-array`: folder path is appended to a JSON array (e.g. copilot-cli)
+- `nested-object`: folder path becomes a key in a nested object with a boolean flag (e.g. claude-code). Requires an additional `nestedKey` field.
 
 Prompt delivery modes:
 

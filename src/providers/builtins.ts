@@ -16,7 +16,12 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     promptDelivery: 'flag',
     promptFlag: '-i',
     exitCommand: '/exit',
-    completionProtocol: { ...DEFAULT_COMPLETION_PROTOCOL }
+    completionProtocol: { ...DEFAULT_COMPLETION_PROTOCOL },
+    trustedFolders: {
+      strategy: 'flat-array',
+      configFile: '~/.copilot/config.json',
+      jsonKey: 'trusted_folders'
+    }
   },
   'claude-code': {
     command: 'claude',
@@ -24,6 +29,12 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     modelFlag: '--model',
     promptDelivery: 'positional',
     exitCommand: '/exit',
-    completionProtocol: { ...DEFAULT_COMPLETION_PROTOCOL }
+    completionProtocol: { ...DEFAULT_COMPLETION_PROTOCOL },
+    trustedFolders: {
+      strategy: 'nested-object',
+      configFile: '~/.claude.json',
+      jsonKey: 'projects',
+      nestedKey: 'hasTrustDialogAccepted'
+    }
   }
 };
