@@ -19,7 +19,8 @@ export default defineConfig({
         'tsup.config.ts',
         'vitest.config.ts',
         '**/*.test.ts',
-        'agent-arena-v2*/**'
+        'agent-arena-v2*/**',
+        '.arena/**'
       ],
       thresholds: {
         lines: 80,

@@ -254,7 +254,8 @@ export const acceptVariant = async (
 };
 
 /**
- * Check for unpushed/unmerged commits on variant branches.
+ * Check for unmerged commits, unpushed commits, and uncommitted changes on variant branches.
+ * Returns human-readable warnings for each branch with safety issues.
  */
 export const checkUnmergedWork = async (
   gitRoot: string,
@@ -263,16 +264,12 @@ export const checkUnmergedWork = async (
 ): Promise<string[]> => {
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   const defaultBranch = await repository.getDefaultBranch(gitRoot);
-  const warnings: string[] = [];
+  const branches = config.variants.map((v) => v.branch);
+  const issues = await repository.getBranchSafetyIssues(gitRoot, branches, defaultBranch);
 
-  for (const variant of config.variants) {
-    const hasWork = await repository.hasCommitsAheadOf(gitRoot, variant.branch, defaultBranch);
-    if (hasWork) {
-      warnings.push(`Branch "${variant.branch}" has unmerged commits ahead of ${defaultBranch}.`);
-    }
-  }
-
-  return warnings;
+  return issues.map(
+    (issue) => `Branch "${issue.branch}": ${issue.reasons.join(', ')}`
+  );
 };
 
 // Legacy — kept for backward compatibility but no longer used by CLI

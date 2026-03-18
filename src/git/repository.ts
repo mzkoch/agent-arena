@@ -48,6 +48,11 @@ export interface WorktreeInfo {
   branch: string;
 }
 
+export interface BranchSafetyIssue {
+  branch: string;
+  reasons: string[];
+}
+
 export class GitRepositoryManager {
   public constructor(
     private readonly runner: CommandRunner,
@@ -202,17 +207,76 @@ export class GitRepositoryManager {
     branch: string,
     baseBranch: string
   ): Promise<boolean> {
+    return (await this.getCommitsAheadCount(gitRoot, branch, baseBranch)) > 0;
+  }
+
+  public async getCommitsAheadCount(
+    gitRoot: string,
+    branch: string,
+    baseBranch: string
+  ): Promise<number> {
     if (!(await branchExists(this.runner, gitRoot, branch))) {
-      return false;
+      return 0;
     }
     const result = await this.runner.run(
       'git',
       gitArgs(gitRoot, ['rev-list', '--count', `${baseBranch}..${branch}`])
     );
     if (result.exitCode !== 0) {
-      return false;
+      return 0;
     }
-    return parseInt(result.stdout.trim(), 10) > 0;
+    return parseInt(result.stdout.trim(), 10);
+  }
+
+  public async getBranchSafetyIssues(
+    gitRoot: string,
+    branches: string[],
+    baseBranch: string
+  ): Promise<BranchSafetyIssue[]> {
+    const worktrees = await this.listWorktrees(gitRoot);
+    const issues: BranchSafetyIssue[] = [];
+
+    for (const branch of branches) {
+      if (!(await branchExists(this.runner, gitRoot, branch))) {
+        continue;
+      }
+
+      const reasons: string[] = [];
+
+      const aheadOfBase = await this.getCommitsAheadCount(gitRoot, branch, baseBranch);
+      if (aheadOfBase > 0) {
+        reasons.push(`${aheadOfBase} commit(s) ahead of ${baseBranch}`);
+      }
+
+      const upstreamResult = await this.runner.run(
+        'git',
+        gitArgs(gitRoot, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`])
+      );
+      if (upstreamResult.exitCode === 0) {
+        const upstream = upstreamResult.stdout.trim();
+        const aheadOfUpstream = await this.getCommitsAheadCount(gitRoot, branch, upstream);
+        if (aheadOfUpstream > 0) {
+          reasons.push(`${aheadOfUpstream} unpushed commit(s)`);
+        }
+      }
+
+      const worktree = worktrees.find((entry) => entry.branch === branch);
+      if (worktree) {
+        const statusResult = await this.runner.run(
+          'git',
+          gitArgs(worktree.path, ['status', '--porcelain'])
+        );
+        if (statusResult.exitCode === 0 && statusResult.stdout.trim().length > 0) {
+          reasons.push('uncommitted changes in worktree');
+        }
+      }
+
+      if (reasons.length > 0) {
+        issues.push({ branch, reasons });
+      }
+    }
+
+    return issues;
   }
 
   public async getDefaultBranch(gitRoot: string): Promise<string> {

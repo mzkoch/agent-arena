@@ -240,6 +240,58 @@ describe('checkUnmergedWork', () => {
       process.chdir(origCwd);
     }
   });
+
+  it('returns warnings for branches with unmerged commits', async () => {
+    const gitRoot = await createGitRepo();
+    await createArena(gitRoot, 'safety-test', {}, logger);
+
+    const origCwd = process.cwd();
+    process.chdir(gitRoot);
+    try {
+      const context = await loadRuntimeContext('safety-test', logger);
+      const variant = context.config.variants[0]!;
+
+      // Create a worktree and make a commit on the variant branch
+      const worktreePath = path.join(gitRoot, '.arena', 'safety-test', 'worktrees', variant.name);
+      await mkdir(worktreePath, { recursive: true });
+      await execFileAsync('git', ['-C', gitRoot, 'worktree', 'add', worktreePath, '-b', variant.branch]);
+      await writeFile(path.join(worktreePath, 'test.txt'), 'hello');
+      await execFileAsync('git', ['-C', worktreePath, '-c', 'user.name=Test', '-c', 'user.email=test@test.com', 'add', '.']);
+      await execFileAsync('git', ['-C', worktreePath, '-c', 'user.name=Test', '-c', 'user.email=test@test.com', 'commit', '-m', 'variant work']);
+
+      const warnings = await checkUnmergedWork(gitRoot, context.config, logger);
+      expect(warnings.length).toBeGreaterThan(0);
+      expect(warnings[0]).toContain(variant.branch);
+      expect(warnings[0]).toContain('commit(s) ahead of');
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  it('detects uncommitted changes in worktrees', async () => {
+    const gitRoot = await createGitRepo();
+    await createArena(gitRoot, 'dirty-test', {}, logger);
+
+    const origCwd = process.cwd();
+    process.chdir(gitRoot);
+    try {
+      const context = await loadRuntimeContext('dirty-test', logger);
+      const variant = context.config.variants[0]!;
+
+      // Create a worktree with dirty files but no commits ahead
+      const worktreePath = path.join(gitRoot, '.arena', 'dirty-test', 'worktrees', variant.name);
+      await mkdir(worktreePath, { recursive: true });
+      await execFileAsync('git', ['-C', gitRoot, 'worktree', 'add', worktreePath, '-b', variant.branch]);
+      await writeFile(path.join(worktreePath, 'dirty.txt'), 'uncommitted');
+
+      const warnings = await checkUnmergedWork(gitRoot, context.config, logger);
+      expect(warnings.length).toBeGreaterThan(0);
+      expect(warnings[0]).toContain('uncommitted changes');
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
 });
 
 describe('cli runtime helpers (legacy)', () => {

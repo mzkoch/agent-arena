@@ -166,7 +166,7 @@ Requirements and instructions are placed in `.arena/` inside each worktree (not 
 `clean` options:
 
 - `--keep-config` keeps arena.json and requirements.md
-- `--force` skips safety checks for unmerged work
+- `--force` skips safety checks (unmerged commits, unpushed commits, uncommitted changes)
 
 All commands auto-discover the arena from `.arena/`. When only one arena exists, the `[name]` argument is optional. When multiple arenas exist, you must specify which one.
 
