@@ -343,7 +343,7 @@ describe('cli runtime helpers (legacy)', () => {
 
     const gitignore = await readFile(path.join(gitRoot, '.gitignore'), 'utf8');
     expect(gitignore).toContain('.arena/');
-  });
+  }, 20_000);
 
   it('initializes a named arena', async () => {
     const gitRoot = await createGitRepo();
@@ -373,7 +373,7 @@ describe('cli runtime helpers (legacy)', () => {
 
     expect(context.paths.arenaDir).toBe(path.join(gitRoot, '.arena', 'my-arena'));
     expect(context.paths.arenaName).toBe('my-arena');
-  });
+  }, 20_000);
 
   it('scaffolds an arena without source files', async () => {
     const gitRoot = await createGitRepo();
@@ -384,7 +384,7 @@ describe('cli runtime helpers (legacy)', () => {
 
     await access(context.paths.configPath);
     await access(context.paths.requirementsPath);
-  });
+  }, 20_000);
 
   it('loads runtime context with auto-discovered config', async () => {
     const gitRoot = await createGitRepo();

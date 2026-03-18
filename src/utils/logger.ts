@@ -29,3 +29,10 @@ export const createLogger = (verbose: boolean): Logger => ({
     writeLog('error', message, context);
   }
 });
+
+export const createNullLogger = (): Logger => ({
+  debug() {},
+  info() {},
+  warn() {},
+  error() {}
+});
