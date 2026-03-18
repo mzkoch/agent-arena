@@ -1,11 +1,9 @@
 import type { CompletionProtocol, VariantConfig } from '../domain/types';
 
 const deliverableChecklist = [
-  'Design document (DESIGN.md)',
-  'Complete implementation',
-  'Automated tests',
-  'Docker support',
-  'README with setup and usage',
+  'Complete implementation of all requirements',
+  'Automated tests for core functionality',
+  'README with setup and usage instructions',
   'All dependencies declared'
 ];
 
@@ -34,6 +32,8 @@ ${deliverableChecklist.map((item, index) => `${index + 1}. ${item}`).join('\n')}
 - Include strong error handling and input validation
 - Write tests for the core functionality
 - Ensure the project builds from a clean checkout
+- **Commit your work early and often** — uncommitted changes may be lost
+- Push your branch to the remote when finished
 
 ### Completion Protocol
 

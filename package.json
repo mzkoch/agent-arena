@@ -14,8 +14,7 @@
     "README.md",
     "DESIGN.md",
     "Formula",
-    "scripts",
-    "Dockerfile"
+    "scripts"
   ],
   "engines": {
     "node": ">=20.0.0"

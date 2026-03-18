@@ -398,20 +398,6 @@ npm run test:coverage
 
 The test suite enforces a minimum 80% coverage threshold for the business-logic surface.
 
-## Docker
-
-Build the image:
-
-```bash
-docker build -t agent-arena .
-```
-
-Run the CLI inside the container:
-
-```bash
-docker run --rm -it -v "$PWD:/workspace" -w /workspace agent-arena --help
-```
-
 ## Contributing
 
 1. Fork the repository.
