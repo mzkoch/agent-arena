@@ -27,6 +27,7 @@ import {
 import type { ArenaSnapshot } from './domain/types';
 import { GitRepositoryManager } from './git/repository';
 import { NodeCommandRunner } from './git/command-runner';
+import { planRemoteCleanup, executeRemoteCleanup, formatRemoteCleanupResult } from './git/remote-cleanup';
 
 const program = new Command();
 
@@ -313,9 +314,10 @@ program
   .command('clean')
   .argument('[name]', 'Arena name')
   .option('--keep-config', 'Keep arena.json and requirements.md')
+  .option('--keep-remote', 'Skip remote branch deletion')
   .option('--force', 'Skip safety checks for unmerged work')
   .description('Remove worktrees safely')
-  .action(async (name: string | undefined, options: { keepConfig?: boolean; force?: boolean }) => {
+  .action(async (name: string | undefined, options: { keepConfig?: boolean; keepRemote?: boolean; force?: boolean }) => {
     const logger = createLogger(Boolean(program.opts().verbose));
     const context = await loadRuntimeContext(name, logger);
 
@@ -334,6 +336,37 @@ program
 
     const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
     const branches = context.config.variants.map((v) => v.branch);
+
+    // Remote cleanup BEFORE local cleanup (spec pattern #11)
+    const plan = await planRemoteCleanup({
+      repository,
+      gitRoot: context.paths.gitRoot,
+      arenaName: context.paths.arenaName,
+      branches,
+      ...(options.force !== undefined && { force: options.force }),
+      ...(options.keepRemote !== undefined && { keepRemote: options.keepRemote }),
+      logger
+    });
+
+    if (plan.toDelete.length > 0 || plan.toSkip.length > 0) {
+      const result = await executeRemoteCleanup({
+        repository,
+        gitRoot: context.paths.gitRoot,
+        plan,
+        logger
+      });
+
+      const summary = formatRemoteCleanupResult(result);
+      if (summary.length > 0) {
+        process.stdout.write(`${summary}\n`);
+      }
+
+      if (result.errors.length > 0) {
+        process.exitCode = 1;
+      }
+    }
+
+    // Local cleanup
     await repository.clean(context.paths.gitRoot, branches);
     await removeSessionFile(context.paths.sessionFilePath);
 

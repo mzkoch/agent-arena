@@ -342,6 +342,96 @@ export class GitRepositoryManager {
     await writeTextFile(gitignorePath, `${content}${prefix}${entry}\n`);
   }
 
+  public async isGhAvailable(gitRoot: string): Promise<boolean> {
+    try {
+      const result = await this.runner.run('gh', ['auth', 'status'], { cwd: gitRoot });
+      return result.exitCode === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  public async isRemoteReachable(gitRoot: string, remote = 'origin'): Promise<boolean> {
+    const result = await this.runner.run(
+      'git',
+      gitArgs(gitRoot, ['ls-remote', '--exit-code', remote, 'HEAD'])
+    );
+    // Exit code 0: reachable with refs; 2: reachable but no matching refs
+    return result.exitCode === 0 || result.exitCode === 2;
+  }
+
+  public async listRemoteRefs(
+    gitRoot: string,
+    remote: string,
+    patterns: string[]
+  ): Promise<Map<string, string>> {
+    const result = await this.runner.run(
+      'git',
+      gitArgs(gitRoot, ['ls-remote', '--refs', remote, ...patterns])
+    );
+    const refs = new Map<string, string>();
+    if (result.exitCode !== 0) {
+      return refs;
+    }
+    for (const line of result.stdout.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
+      const [oid, ref] = trimmed.split(/\s+/).map((s) => s.trim());
+      if (oid && ref) {
+        refs.set(ref, oid);
+      }
+    }
+    return refs;
+  }
+
+  public async deleteRemoteBranch(
+    gitRoot: string,
+    branch: string,
+    remote = 'origin'
+  ): Promise<void> {
+    await ensureSuccess(
+      this.runner,
+      gitRoot,
+      ['push', remote, '--delete', branch],
+      `Failed to delete remote branch ${branch}`
+    );
+  }
+
+  public async hasOpenPullRequest(
+    gitRoot: string,
+    branch: string,
+    remoteRefs: Map<string, string>,
+    ghAvailable: boolean
+  ): Promise<boolean> {
+    if (ghAvailable) {
+      const result = await this.runner.run(
+        'gh',
+        ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number', '--limit', '1'],
+        { cwd: gitRoot }
+      );
+      if (result.exitCode === 0) {
+        const output = result.stdout.trim();
+        if (output.length > 0 && output !== '[]') {
+          return true;
+        }
+        return false;
+      }
+      // gh failed for this branch — fall through to OID matching
+    }
+
+    // OID-based PR detection fallback
+    const branchOid = remoteRefs.get(`refs/heads/${branch}`);
+    if (!branchOid) {
+      return false;
+    }
+    for (const [ref, oid] of remoteRefs) {
+      if (ref.startsWith('refs/pull/') && ref.endsWith('/head') && oid === branchOid) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   public async refExists(repoPath: string, ref: string): Promise<boolean> {
     const result = await this.runner.run('git', gitArgs(repoPath, ['rev-parse', '--verify', ref]));
     return result.exitCode === 0;

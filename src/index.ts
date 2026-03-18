@@ -4,6 +4,7 @@ export * from './domain/types';
 export * from './evaluation/report';
 export * from './git/command-runner';
 export * from './git/repository';
+export * from './git/remote-cleanup';
 export * from './ipc/client';
 export * from './ipc/protocol';
 export * from './ipc/server';

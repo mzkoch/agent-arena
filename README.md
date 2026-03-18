@@ -86,9 +86,12 @@ Clean worktrees and branches (with safety checks for unmerged work):
 
 ```bash
 arena clean
-arena clean --force        # skip unmerged work checks
+arena clean --force        # skip unmerged work checks and force remote deletion
 arena clean --keep-config  # keep arena.json and requirements.md
+arena clean --keep-remote  # skip remote branch deletion
 ```
+
+By default, `arena clean` also deletes remote branches for non-accepted variants. Branches with open pull requests are preserved unless `--force` is used. Accepted variant branches (created via `arena accept`) are never deleted remotely. If the remote is unreachable, remote cleanup is skipped gracefully.
 
 ### Multiple Arenas
 
@@ -154,7 +157,7 @@ Requirements and instructions are placed in `.arena/` inside each worktree (not 
 | `arena monitor [name]` | Attach the TUI to a running headless session |
 | `arena status [name]` | Print JSON state for the arena |
 | `arena evaluate [name]` | Scan worktrees and write comparison report |
-| `arena clean [name] [--keep-config] [--force]` | Remove worktrees safely |
+| `arena clean [name] [--keep-config] [--keep-remote] [--force]` | Remove worktrees and remote branches safely |
 | `arena version` | Print the installed version |
 
 `create` options:
@@ -166,7 +169,8 @@ Requirements and instructions are placed in `.arena/` inside each worktree (not 
 `clean` options:
 
 - `--keep-config` keeps arena.json and requirements.md
-- `--force` skips safety checks (unmerged commits, unpushed commits, uncommitted changes)
+- `--keep-remote` skips remote branch deletion (preserves current local-only behavior)
+- `--force` skips safety checks (unmerged commits, unpushed commits, uncommitted changes) and deletes remote branches with open PRs
 
 All commands auto-discover the arena from `.arena/`. When only one arena exists, the `[name]` argument is optional. When multiple arenas exist, you must specify which one.
 
