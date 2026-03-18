@@ -6,6 +6,7 @@ import {
   levenshteinDistance,
   findClosestModel,
   buildModelValidationError,
+  looksLikeInvalidModelError,
   type CommandExecutor
 } from './model-discovery';
 import type { ProviderConfig, ModelDiscoveryConfig } from '../domain/types';
@@ -214,7 +215,7 @@ describe('findClosestModel', () => {
   });
 
   it('finds close match (typo)', () => {
-    expect(findClosestModel('gpt-5.2', models)).toBe('gpt-5.1');
+    expect(findClosestModel('gpt-5.2', models)).toBe('gpt-5'); // substring bonus prefers base model
   });
 
   it('returns null for completely unrelated string', () => {
@@ -252,5 +253,37 @@ describe('buildModelValidationError', () => {
   it('omits suggestion when no close match', () => {
     const error = buildModelValidationError('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'copilot-cli', models);
     expect(error).not.toContain('Did you mean');
+  });
+});
+
+describe('looksLikeInvalidModelError', () => {
+  it('detects typical invalid model error', () => {
+    const output = 'Error: Invalid model "gpt-5.2". Must be one of the available models.';
+    expect(looksLikeInvalidModelError(output, 'gpt-5.2')).toBe(true);
+  });
+
+  it('detects "unknown model" phrasing', () => {
+    const output = 'Unknown model "gemini-3-pro" specified. Did you mean gemini-3-pro-preview?';
+    expect(looksLikeInvalidModelError(output, 'gemini-3-pro')).toBe(true);
+  });
+
+  it('detects model name near "model" keyword', () => {
+    const output = 'The model gpt-fake is not a valid choice.';
+    expect(looksLikeInvalidModelError(output, 'gpt-fake')).toBe(true);
+  });
+
+  it('returns false for unrelated errors', () => {
+    const output = 'Error: network timeout after 5000ms';
+    expect(looksLikeInvalidModelError(output, 'gpt-5')).toBe(false);
+  });
+
+  it('returns false when model name is not mentioned', () => {
+    const output = 'Invalid model specified. Please check your configuration.';
+    expect(looksLikeInvalidModelError(output, 'some-very-unique-model-name')).toBe(false);
+  });
+
+  it('is case-insensitive', () => {
+    const output = 'UNSUPPORTED MODEL "GPT-5.2" - please use a valid model';
+    expect(looksLikeInvalidModelError(output, 'gpt-5.2')).toBe(true);
   });
 });

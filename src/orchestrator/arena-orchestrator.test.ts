@@ -191,7 +191,8 @@ describe('ArenaOrchestrator', () => {
     await orchestrator.startAll();
     expect(ptyCount).toBe(1);
 
-    // Simulate early failure (within 15s threshold)
+    // Simulate invalid model error output then early failure
+    fakePtys[0]!.emitData('Error: Invalid model "gpt-5.1-code". Must be one of the available models.\n');
     currentTime = 2000; // 1 second elapsed
     fakePtys[0]!.emitExit(1);
 
@@ -264,7 +265,8 @@ describe('ArenaOrchestrator', () => {
     await orchestrator.startAll();
     expect(ptyCount).toBe(1);
 
-    // First early failure — triggers recovery
+    // First early failure with model error output — triggers recovery
+    fakePtys[0]!.emitData('Error: Invalid model "gpt-5.2". Must be one of the available models.\n');
     currentTime = 2000;
     fakePtys[0]!.emitExit(1);
 
@@ -273,6 +275,7 @@ describe('ArenaOrchestrator', () => {
     });
 
     // Second early failure — should NOT retry (modelRetryAttempted = true)
+    fakePtys[1]!.emitData('Error: Invalid model "gpt-5". Must be one of the available models.\n');
     currentTime = 3000;
     fakePtys[1]!.emitExit(1);
 

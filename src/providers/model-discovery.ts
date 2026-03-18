@@ -118,9 +118,12 @@ export const levenshteinDistance = (a: string, b: string): number => {
   return prev[lb]!;
 };
 
+const normalizeModelToken = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
 /**
- * Find the closest matching model from a list of valid models.
- * Returns the best match if the similarity is within a reasonable threshold.
+ * Find the closest matching model using normalized Levenshtein distance
+ * with a substring bonus (e.g. "gemini-3-pro" matches "gemini-3-pro-preview").
  */
 export const findClosestModel = (
   invalidModel: string,
@@ -130,25 +133,35 @@ export const findClosestModel = (
     return null;
   }
 
-  let bestMatch: string | null = null;
-  let bestDistance = Infinity;
+  const normalizedRequested = normalizeModelToken(invalidModel);
+  if (!normalizedRequested) {
+    return null;
+  }
+
+  let bestMatch: { model: string; score: number } | undefined;
 
   for (const model of validModels) {
-    const distance = levenshteinDistance(
-      invalidModel.toLowerCase(),
-      model.toLowerCase()
-    );
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestMatch = model;
+    const normalizedCandidate = normalizeModelToken(model);
+    const longestLength = Math.max(normalizedRequested.length, normalizedCandidate.length);
+    if (longestLength === 0) {
+      continue;
+    }
+
+    let score = levenshteinDistance(normalizedRequested, normalizedCandidate) / longestLength;
+    // Substring bonus: if one model name contains the other, boost the score
+    if (
+      normalizedCandidate.includes(normalizedRequested)
+      || normalizedRequested.includes(normalizedCandidate)
+    ) {
+      score -= 0.2;
+    }
+
+    if (!bestMatch || score < bestMatch.score) {
+      bestMatch = { model, score };
     }
   }
 
-  // Threshold: allow up to 40% of the longer string's length as the max distance
-  const maxLen = Math.max(invalidModel.length, bestMatch?.length ?? 0);
-  const threshold = Math.max(3, Math.ceil(maxLen * 0.4));
-
-  return bestDistance <= threshold ? bestMatch : null;
+  return bestMatch && bestMatch.score <= 0.45 ? bestMatch.model : null;
 };
 
 /**
@@ -165,4 +178,27 @@ export const buildModelValidationError = (
     : '';
   const modelList = validModels.map((m) => `  - ${m}`).join('\n');
   return `Invalid model "${model}" for provider "${providerName}".${suggestion}\nValid models:\n${modelList}`;
+};
+
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Detect whether agent output indicates an invalid model error.
+ * Uses keyword matching plus model name context to avoid false positives.
+ */
+export const looksLikeInvalidModelError = (
+  output: string,
+  requestedModel: string
+): boolean => {
+  const normalizedOutput = output.toLowerCase();
+  const normalizedModel = requestedModel.toLowerCase();
+  const mentionsModel = normalizedOutput.includes(normalizedModel);
+  const invalidModelPattern = /(invalid|unknown|unsupported|unrecognized|not a valid|no such model|must be one of|available models|did you mean)/i;
+  const modelContextPattern = new RegExp(
+    `model[^\\n]{0,80}${escapeRegExp(normalizedModel)}|${escapeRegExp(normalizedModel)}[^\\n]{0,80}model`,
+    'i'
+  );
+
+  return invalidModelPattern.test(output) && (mentionsModel || modelContextPattern.test(normalizedOutput));
 };

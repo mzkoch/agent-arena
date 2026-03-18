@@ -11,7 +11,7 @@ import { buildLaunchPrompt, buildStatusCheckPrompt } from '../prompt/builder';
 import { ProviderRegistry, buildProviderCommand } from '../providers/registry';
 import { ensureTrustedFolder, registerTrustedFolders } from '../providers/trusted-folders';
 import { getModelCachePath } from '../providers/model-cache';
-import type { CommandExecutor } from '../providers/model-discovery';
+import { looksLikeInvalidModelError, type CommandExecutor } from '../providers/model-discovery';
 import type { ServerToClientMessage } from '../ipc/protocol';
 import { OutputBuffer } from '../utils/output-buffer';
 import stripAnsi from 'strip-ansi';
@@ -330,9 +330,16 @@ export class ArenaOrchestrator extends EventEmitter<{
       return;
     }
 
-    // Attempt model recovery for early failures
+    // Attempt model recovery for early failures that look like invalid model errors
     const elapsed = agent.startedAt ? this.now() - agent.startedAt : Infinity;
-    if (exitCode !== 0 && elapsed < EARLY_FAILURE_THRESHOLD_MS && !agent.modelRetryAttempted) {
+    const currentModel = agent.effectiveModel ?? agent.workspace.variant.model;
+    const outputText = agent.outputBuffer.getPlainText();
+    if (
+      exitCode !== 0
+      && elapsed < EARLY_FAILURE_THRESHOLD_MS
+      && !agent.modelRetryAttempted
+      && looksLikeInvalidModelError(outputText, currentModel)
+    ) {
       void this.attemptModelRecovery(agentName, exitCode);
       return;
     }
