@@ -1,4 +1,5 @@
 import type { AgentSnapshot, ArenaSnapshot } from '../domain/types';
+import { isTerminalStatus } from '../domain/types';
 import type { ServerToClientMessage } from '../ipc/protocol';
 
 const replaceAgent = (
@@ -28,8 +29,7 @@ export const applyServerMessage = (
   }
 };
 
-export const isTerminalStatus = (status: AgentSnapshot['status']): boolean =>
-  status === 'completed' || status === 'failed' || status === 'killed';
+export { isTerminalStatus };
 
 export const hasActiveAgents = (snapshot: ArenaSnapshot): boolean =>
   snapshot.agents.some((agent) => !isTerminalStatus(agent.status));

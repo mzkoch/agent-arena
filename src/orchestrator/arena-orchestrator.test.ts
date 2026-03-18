@@ -318,4 +318,223 @@ describe('ArenaOrchestrator', () => {
     // No retry attempt
     expect(ptyCount).toBe(1);
   });
+
+  describe('terminal status permanence (oscillation prevention)', () => {
+    it('completed status is never overwritten by idle timer', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+
+      // Complete via done marker
+      fakePty.emitData('DONE\n');
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      // Advance timers well past idle timeout — handleIdle must not overwrite
+      await vi.advanceTimersByTimeAsync(200);
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+
+      vi.useRealTimers();
+    });
+
+    it('completed status is never overwritten by post-completion data', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+
+      fakePty.emitData('DONE\n');
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      // Simulate data arriving after completion (e.g., terminal cleanup)
+      fakePty.emitData('post-completion noise\n');
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      vi.useRealTimers();
+    });
+
+    it('completed status is never overwritten by continue marker after completion', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+
+      fakePty.emitData('DONE\n');
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      // Continue marker after completion must not revert to running
+      fakePty.emitData('CONT\n');
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      vi.useRealTimers();
+    });
+
+    it('failed status is permanent — not overwritten by timers or data', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      let currentTime = 1000;
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        now: () => currentTime
+      });
+
+      await orchestrator.startAll();
+
+      // Late failure (past recovery threshold)
+      currentTime = 1000 + 60_000;
+      fakePty.emitExit(1);
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('failed');
+      });
+
+      // Post-failure data and timer advances must not change status
+      fakePty.emitData('zombie data\n');
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('failed');
+      vi.useRealTimers();
+    });
+
+    it('killed status is permanent — not overwritten by timers or data', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+      await orchestrator.killAgent('alpha');
+
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('killed');
+
+      // Post-kill data and timer advances must not change status
+      fakePty.emitData('zombie data\n');
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('killed');
+      vi.useRealTimers();
+    });
+
+    it('status events never show a terminal→non-terminal transition', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      const statusHistory: string[] = [];
+      orchestrator.on('message', (msg) => {
+        if (msg.type === 'agent-state') {
+          statusHistory.push(msg.status);
+        }
+      });
+
+      await orchestrator.startAll();
+
+      // Complete the agent
+      fakePty.emitData('DONE\n');
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      // Bombard with data and timer advances
+      fakePty.emitData('extra data\n');
+      fakePty.emitData('CONT\n');
+      await vi.advanceTimersByTimeAsync(500);
+
+      // Find the index of the first 'completed' status
+      const completedIndex = statusHistory.indexOf('completed');
+      expect(completedIndex).toBeGreaterThanOrEqual(0);
+
+      // After 'completed', no non-terminal statuses should appear
+      const postCompletion = statusHistory.slice(completedIndex + 1);
+      const nonTerminal = postCompletion.filter(
+        (s) => s !== 'completed' && s !== 'failed' && s !== 'killed'
+      );
+      expect(nonTerminal).toEqual([]);
+
+      vi.useRealTimers();
+    });
+
+
+    it('absolute timer firing after completion does not overwrite terminal status', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+
+      // Complete via done marker
+      fakePty.emitData('DONE\n');
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      // Advance past the absolute timeout — failAgent must not overwrite completed
+      await vi.advanceTimersByTimeAsync(config.agentTimeoutMs + 1000);
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+
+      vi.useRealTimers();
+    });
+
+    it('failAgent is idempotent — does not corrupt already-completed agent state', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      let currentTime = 1000;
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        now: () => currentTime
+      });
+
+      await orchestrator.startAll();
+
+      // Complete the agent
+      fakePty.emitData('DONE\n');
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      const snapshotAfterComplete = orchestrator.getSnapshot().agents[0]!;
+
+      // Advance time and trigger absolute timeout
+      currentTime = 1000 + config.agentTimeoutMs + 5000;
+      await vi.advanceTimersByTimeAsync(config.agentTimeoutMs + 5000);
+
+      // Status, exitCode, and completedAt must remain unchanged
+      const snapshotAfterTimeout = orchestrator.getSnapshot().agents[0]!;
+      expect(snapshotAfterTimeout.status).toBe('completed');
+      expect(snapshotAfterTimeout.exitCode).toBe(snapshotAfterComplete.exitCode);
+      expect(snapshotAfterTimeout.error).toBeUndefined();
+
+      vi.useRealTimers();
+    });
+  });
 });
