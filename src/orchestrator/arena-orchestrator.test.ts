@@ -3,8 +3,7 @@ import { mkdtemp, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ArenaConfig, Logger, VariantWorkspace } from '../domain/types';
-import { ArenaOrchestrator } from './arena-orchestrator';
-import { formatLaunchError } from './arena-orchestrator';
+import { ArenaOrchestrator, formatLaunchError } from './arena-orchestrator';
 import type { PtyFactory, PtyProcess } from './pty';
 import { saveModelCache } from '../providers/model-cache';
 
@@ -480,8 +479,6 @@ describe('ArenaOrchestrator', () => {
 
       vi.useRealTimers();
     });
-
-
     it('absolute timer firing after completion does not overwrite terminal status', async () => {
       vi.useFakeTimers();
       const fakePty = new FakePty();
