@@ -10,6 +10,8 @@ import type {
 import { buildLaunchPrompt, buildStatusCheckPrompt } from '../prompt/builder';
 import { ProviderRegistry, buildProviderCommand } from '../providers/registry';
 import { ensureTrustedFolder, registerTrustedFolders } from '../providers/trusted-folders';
+import { getModelCachePath } from '../providers/model-cache';
+import { looksLikeInvalidModelError, type CommandExecutor } from '../providers/model-discovery';
 import type { ServerToClientMessage } from '../ipc/protocol';
 import { OutputBuffer } from '../utils/output-buffer';
 import stripAnsi from 'strip-ansi';
@@ -17,6 +19,9 @@ import type { ProcessTerminator } from '../utils/process';
 import { terminateProcessTree } from '../utils/process';
 import type { PtyFactory, PtyProcess } from './pty';
 import { nodePtyFactory } from './pty';
+
+/** Threshold in milliseconds for detecting early failures (likely bad model). */
+const EARLY_FAILURE_THRESHOLD_MS = 15_000;
 
 interface ManagedAgent {
   workspace: VariantWorkspace;
@@ -34,12 +39,18 @@ interface ManagedAgent {
   checksPerformed: number;
   interactive: boolean;
   killedByUser: boolean;
+  /** Whether a model recovery retry has already been attempted. */
+  modelRetryAttempted: boolean;
+  /** The effective model (may differ from config after recovery). */
+  effectiveModel?: string | undefined;
 }
 
 interface OrchestratorDependencies {
   ptyFactory?: PtyFactory;
   processTerminator?: ProcessTerminator;
   now?: () => number;
+  /** Custom command executor for model discovery (used in tests). */
+  commandExecutor?: CommandExecutor;
 }
 
 export class ArenaOrchestrator extends EventEmitter<{
@@ -67,7 +78,8 @@ export class ArenaOrchestrator extends EventEmitter<{
         outputBuffer: new OutputBuffer(),
         checksPerformed: 0,
         interactive: false,
-        killedByUser: false
+        killedByUser: false,
+        modelRetryAttempted: false
       });
     }
   }
@@ -120,9 +132,15 @@ export class ArenaOrchestrator extends EventEmitter<{
     const agent = this.getAgent(agentName);
     const { variant, worktreePath } = agent.workspace;
     const provider = this.registry.get(variant.provider);
+
+    // Use effective model if set (from recovery), otherwise use config model
+    const effectiveVariant = agent.effectiveModel
+      ? { ...variant, model: agent.effectiveModel }
+      : variant;
+
     const prompt = buildProviderCommand(
       provider,
-      variant,
+      effectiveVariant,
       buildLaunchPrompt(),
       this.config.maxContinues
     );
@@ -312,6 +330,68 @@ export class ArenaOrchestrator extends EventEmitter<{
       return;
     }
 
+    // Attempt model recovery for early failures that look like invalid model errors
+    const elapsed = agent.startedAt ? this.now() - agent.startedAt : Infinity;
+    const currentModel = agent.effectiveModel ?? agent.workspace.variant.model;
+    const outputText = agent.outputBuffer.getPlainText();
+    if (
+      exitCode !== 0
+      && elapsed < EARLY_FAILURE_THRESHOLD_MS
+      && !agent.modelRetryAttempted
+      && looksLikeInvalidModelError(outputText, currentModel)
+    ) {
+      void this.attemptModelRecovery(agentName, exitCode);
+      return;
+    }
+
+    void this.failAgent(agentName, `Agent exited with code ${exitCode}`, exitCode);
+  }
+
+  /**
+   * Attempt to recover from a model-related failure by finding the closest valid model
+   * and retrying the agent with the corrected model name.
+   */
+  private async attemptModelRecovery(agentName: string, exitCode: number): Promise<void> {
+    const agent = this.getAgent(agentName);
+    agent.modelRetryAttempted = true;
+
+    const { variant } = agent.workspace;
+    const currentModel = agent.effectiveModel ?? variant.model;
+    const cachePath = getModelCachePath(this.gitRoot);
+
+    try {
+      const closestModel = await this.registry.findClosestModel(
+        variant.provider,
+        currentModel,
+        cachePath,
+        this.dependencies.commandExecutor
+      );
+
+      if (closestModel && closestModel !== currentModel) {
+        this.logger.info(
+          `Variant "${agentName}" failed with model "${currentModel}". Retrying with "${closestModel}".`,
+          { agent: agentName, originalModel: currentModel, correctedModel: closestModel }
+        );
+
+        agent.effectiveModel = closestModel;
+        this.clearTimers(agent);
+
+        // Clean up old process
+        if (agent.pid) {
+          try {
+            await this.processTerminator(agent.pid);
+          } catch {
+            // Process already exited
+          }
+        }
+
+        this.launchAgent(agentName);
+        return;
+      }
+    } catch {
+      // Discovery failed — fall through to normal failure
+    }
+
     void this.failAgent(agentName, `Agent exited with code ${exitCode}`, exitCode);
   }
 
@@ -375,7 +455,7 @@ export class ArenaOrchestrator extends EventEmitter<{
     return {
       name: agent.workspace.variant.name,
       provider: agent.workspace.variant.provider,
-      model: agent.workspace.variant.model,
+      model: agent.effectiveModel ?? agent.workspace.variant.model,
       branch: agent.workspace.variant.branch,
       worktreePath: agent.workspace.worktreePath,
       status: agent.status,

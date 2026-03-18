@@ -8,7 +8,7 @@ Your implementation should be complete, production-ready, and elegant.
 ### Your Constraints
 
 - Tech Stack: TypeScript, Node.js
-- Design Philosophy: Clean architecture with clear separation of concerns. Prefer small, focused functions. Add comprehensive tests for all new commands.
+- Design Philosophy: Clean architecture with clear separation of concerns. Prefer small, focused functions. Add comprehensive tests for all new functionality.
 
 ### Deliverables
 

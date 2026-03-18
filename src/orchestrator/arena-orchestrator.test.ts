@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, mkdir } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { ArenaConfig, Logger, VariantWorkspace } from '../domain/types';
 import { ArenaOrchestrator } from './arena-orchestrator';
 import type { PtyFactory, PtyProcess } from './pty';
+import { saveModelCache } from '../providers/model-cache';
 
 class FakePty implements PtyProcess {
   public readonly writes: string[] = [];
@@ -42,7 +46,7 @@ class FakePty implements PtyProcess {
 
 const logger: Logger = {
   debug() {},
-  info() {},
+  info: vi.fn(),
   warn() {},
   error() {}
 };
@@ -125,5 +129,193 @@ describe('ArenaOrchestrator', () => {
     fakePty.emitData('CONT\n');
     expect(orchestrator.getSnapshot().agents[0]?.status).toBe('running');
     vi.useRealTimers();
+  });
+
+  it('attempts model recovery on early failure with a close match', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'orch-recovery-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    // Pre-populate model cache with valid models
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      fake: {
+        models: ['gpt-5', 'gpt-5.1', 'gpt-5.1-codex'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    const badModelConfig: ArenaConfig = {
+      ...config,
+      variants: [
+        {
+          name: 'alpha',
+          provider: 'fake',
+          model: 'gpt-5.1-code',  // Typo — close to gpt-5.1-codex
+          techStack: 'TypeScript',
+          designPhilosophy: 'Testable',
+          branch: 'variant/alpha'
+        }
+      ]
+    };
+
+    const badWorkspaces: VariantWorkspace[] = [
+      { variant: badModelConfig.variants[0]!, worktreePath: '/tmp/alpha' }
+    ];
+
+    let ptyCount = 0;
+    const fakePtys: FakePty[] = [];
+    const ptyFactory: PtyFactory = () => {
+      const pty = new FakePty();
+      fakePtys.push(pty);
+      ptyCount++;
+      return pty;
+    };
+
+    const infoFn = vi.fn();
+    const infoLogger: Logger = {
+      debug() {},
+      info: infoFn,
+      warn() {},
+      error() {}
+    };
+
+    let currentTime = 1000;
+    const orchestrator = new ArenaOrchestrator(badModelConfig, badWorkspaces, tempDir, infoLogger, {
+      ptyFactory,
+      processTerminator: () => Promise.resolve(),
+      now: () => currentTime
+    });
+
+    await orchestrator.startAll();
+    expect(ptyCount).toBe(1);
+
+    // Simulate invalid model error output then early failure
+    fakePtys[0]!.emitData('Error: Invalid model "gpt-5.1-code". Must be one of the available models.\n');
+    currentTime = 2000; // 1 second elapsed
+    fakePtys[0]!.emitExit(1);
+
+    // Wait for async recovery to complete
+    await vi.waitFor(() => {
+      expect(ptyCount).toBe(2); // Recovery launched a new PTY
+    });
+
+    // Check snapshot reflects corrected model
+    const snapshot = orchestrator.getSnapshot();
+    expect(snapshot.agents[0]?.model).toBe('gpt-5.1-codex');
+    // Agent may be 'running' or 'idle' depending on timer behavior
+    expect(['running', 'idle']).toContain(snapshot.agents[0]?.status);
+
+    // Verify log message
+    const infoCalls = infoFn.mock.calls;
+    expect(infoCalls.some((args) => typeof args[0] === 'string' && args[0].includes('Retrying with "gpt-5.1-codex"'))).toBe(true);
+
+    await orchestrator.close();
+  });
+
+  it('does not retry model recovery more than once', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'orch-no-retry-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      fake: {
+        models: ['gpt-5', 'gpt-5.1'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    const badModelConfig: ArenaConfig = {
+      ...config,
+      variants: [
+        {
+          name: 'alpha',
+          provider: 'fake',
+          model: 'gpt-5.2',  // Close to gpt-5.1
+          techStack: 'TypeScript',
+          designPhilosophy: 'Testable',
+          branch: 'variant/alpha'
+        }
+      ]
+    };
+
+    const badWorkspaces: VariantWorkspace[] = [
+      { variant: badModelConfig.variants[0]!, worktreePath: '/tmp/alpha' }
+    ];
+
+    let ptyCount = 0;
+    const fakePtys: FakePty[] = [];
+    const ptyFactory: PtyFactory = () => {
+      const pty = new FakePty();
+      fakePtys.push(pty);
+      ptyCount++;
+      return pty;
+    };
+
+    let currentTime = 1000;
+    const orchestrator = new ArenaOrchestrator(badModelConfig, badWorkspaces, tempDir, logger, {
+      ptyFactory,
+      processTerminator: () => Promise.resolve(),
+      now: () => currentTime
+    });
+
+    await orchestrator.startAll();
+    expect(ptyCount).toBe(1);
+
+    // First early failure with model error output — triggers recovery
+    fakePtys[0]!.emitData('Error: Invalid model "gpt-5.2". Must be one of the available models.\n');
+    currentTime = 2000;
+    fakePtys[0]!.emitExit(1);
+
+    await vi.waitFor(() => {
+      expect(ptyCount).toBe(2);
+    });
+
+    // Second early failure — should NOT retry (modelRetryAttempted = true)
+    fakePtys[1]!.emitData('Error: Invalid model "gpt-5". Must be one of the available models.\n');
+    currentTime = 3000;
+    fakePtys[1]!.emitExit(1);
+
+    await vi.waitFor(() => {
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('failed');
+    });
+
+    // No third PTY created
+    expect(ptyCount).toBe(2);
+  });
+
+  it('does not attempt recovery for late failures', async () => {
+    let ptyCount = 0;
+    const fakePtys: FakePty[] = [];
+    const ptyFactory: PtyFactory = () => {
+      const pty = new FakePty();
+      fakePtys.push(pty);
+      ptyCount++;
+      return pty;
+    };
+
+    let currentTime = 1000;
+    const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+      ptyFactory,
+      processTerminator: () => Promise.resolve(),
+      now: () => currentTime
+    });
+
+    await orchestrator.startAll();
+    expect(ptyCount).toBe(1);
+
+    // Late failure (well past 15s threshold)
+    currentTime = 1000 + 60_000;
+    fakePtys[0]!.emitExit(1);
+
+    await vi.waitFor(() => {
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('failed');
+    });
+
+    // No retry attempt
+    expect(ptyCount).toBe(1);
   });
 });

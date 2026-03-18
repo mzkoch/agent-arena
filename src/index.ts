@@ -12,6 +12,8 @@ export * from './orchestrator/arena-orchestrator';
 export * from './orchestrator/pty';
 export * from './prompt/builder';
 export * from './providers/builtins';
+export * from './providers/model-cache';
+export * from './providers/model-discovery';
 export * from './providers/registry';
 export * from './providers/trusted-folders';
 export * from './utils/files';

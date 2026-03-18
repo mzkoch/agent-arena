@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { discoverArenaConfig, findGitRoot, listArenaNames, loadArenaConfig, resolveArenaName, resolveArenaPaths } from './load';
+import { saveModelCache } from '../providers/model-cache';
 
 const execFileAsync = promisify(execFile);
 
@@ -171,5 +172,202 @@ describe('resolveArenaName', () => {
     await writeFile(path.join(arenaRoot, 'b', 'arena.json'), '{}');
 
     await expect(resolveArenaName(tempDir)).rejects.toThrow(/multiple arenas found/i);
+  });
+});
+
+describe('loadArenaConfig model validation', () => {
+  it('rejects an invalid model when discovery finds valid models', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-model-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const configPath = path.join(tempDir, 'arena.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        variants: [
+          {
+            name: 'bad-variant',
+            provider: 'copilot-cli',
+            model: 'nonexistent-model',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Test'
+          }
+        ]
+      })
+    );
+
+    // Pre-populate cache with valid models
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      'copilot-cli': {
+        models: ['gpt-5', 'gpt-5.1', 'claude-opus-4.6'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    await expect(
+      loadArenaConfig(configPath, 'default', { gitRoot: tempDir })
+    ).rejects.toThrow(/model validation failed/i);
+  });
+
+  it('includes suggestion for close model match', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-model-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const configPath = path.join(tempDir, 'arena.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        variants: [
+          {
+            name: 'typo-variant',
+            provider: 'copilot-cli',
+            model: 'gemini-3-pro',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Test'
+          }
+        ]
+      })
+    );
+
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      'copilot-cli': {
+        models: ['gpt-5', 'gemini-3-pro-preview'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    await expect(
+      loadArenaConfig(configPath, 'default', { gitRoot: tempDir })
+    ).rejects.toThrow(/did you mean "gemini-3-pro-preview"/i);
+  });
+
+  it('skips validation when gitRoot not provided', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-model-'));
+    const configPath = path.join(tempDir, 'arena.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        variants: [
+          {
+            name: 'any-model',
+            model: 'anything-goes',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Test'
+          }
+        ]
+      })
+    );
+
+    // Should succeed without validation
+    const config = await loadArenaConfig(configPath);
+    expect(config.variants[0]?.model).toBe('anything-goes');
+  });
+
+  it('skips validation when skipModelValidation is true', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-model-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const configPath = path.join(tempDir, 'arena.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        variants: [
+          {
+            name: 'skip-variant',
+            model: 'nonexistent-model',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Test'
+          }
+        ]
+      })
+    );
+
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      'copilot-cli': {
+        models: ['gpt-5'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    const config = await loadArenaConfig(configPath, 'default', {
+      gitRoot: tempDir,
+      skipModelValidation: true
+    });
+    expect(config.variants[0]?.model).toBe('nonexistent-model');
+  });
+
+  it('allows valid models to pass validation', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-model-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const configPath = path.join(tempDir, 'arena.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        variants: [
+          {
+            name: 'good-variant',
+            model: 'gpt-5',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Test'
+          }
+        ]
+      })
+    );
+
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      'copilot-cli': {
+        models: ['gpt-5', 'gpt-5.1'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    const config = await loadArenaConfig(configPath, 'default', { gitRoot: tempDir });
+    expect(config.variants[0]?.model).toBe('gpt-5');
+  });
+
+  it('skips validation gracefully when discovery is not configured', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-model-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const configPath = path.join(tempDir, 'arena.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        providers: {
+          'custom-provider': {
+            command: 'custom',
+            promptDelivery: 'positional',
+            exitCommand: '/quit'
+          }
+        },
+        variants: [
+          {
+            name: 'custom-variant',
+            provider: 'custom-provider',
+            model: 'any-model',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Test'
+          }
+        ]
+      })
+    );
+
+    // No cache, no discovery config on custom provider — should pass
+    const config = await loadArenaConfig(configPath, 'default', { gitRoot: tempDir });
+    expect(config.variants[0]?.model).toBe('any-model');
   });
 });

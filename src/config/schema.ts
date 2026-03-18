@@ -44,7 +44,13 @@ export const providerConfigSchema = z
     maxContinuesFlag: z.string().min(1).optional(),
     exitCommand: z.string().min(1),
     completionProtocol: completionProtocolSchema.default(defaultCompletionProtocol),
-    trustedFolders: trustedFoldersSchema.optional()
+    trustedFolders: trustedFoldersSchema.optional(),
+    modelDiscovery: z.object({
+      command: z.string().min(1),
+      args: z.array(z.string()),
+      parseStrategy: z.string().min(1)
+    }).optional(),
+    supportedModels: z.array(z.string().min(1)).optional()
   })
   .superRefine((value, ctx) => {
     if (value.promptDelivery === 'flag' && !value.promptFlag) {

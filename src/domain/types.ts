@@ -33,6 +33,12 @@ export type TrustedFoldersConfig =
   | FlatArrayTrustedFoldersConfig
   | NestedObjectTrustedFoldersConfig;
 
+export interface ModelDiscoveryConfig {
+  command: string;
+  args: string[];
+  parseStrategy: string;
+}
+
 export interface ProviderConfig {
   command: string;
   baseArgs: string[];
@@ -43,6 +49,8 @@ export interface ProviderConfig {
   exitCommand: string;
   completionProtocol: CompletionProtocol;
   trustedFolders?: TrustedFoldersConfig | undefined;
+  modelDiscovery?: ModelDiscoveryConfig | undefined;
+  supportedModels?: string[] | undefined;
 }
 
 export interface VariantConfig {

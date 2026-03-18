@@ -5,6 +5,9 @@ import { promisify } from 'node:util';
 import type { ArenaConfig, ArenaPaths, VariantConfig } from '../domain/types';
 import { readJsonFile } from '../utils/files';
 import { arenaConfigSchema } from './schema';
+import { ProviderRegistry } from '../providers/registry';
+import { getModelCachePath } from '../providers/model-cache';
+import { buildModelValidationError, type CommandExecutor } from '../providers/model-discovery';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,18 +36,38 @@ const normalizeVariant = (variant: {
   branch: variant.branch ?? `arena/${arenaName}/${variant.name}`
 });
 
-export const loadArenaConfig = async (configPath: string, arenaName: string = DEFAULT_ARENA_NAME): Promise<ArenaConfig> => {
+export interface LoadArenaConfigOptions {
+  /** Path to the git root — required for model validation/caching. */
+  gitRoot?: string;
+  /** Custom command executor for model discovery (used in tests). */
+  executor?: CommandExecutor;
+  /** Skip model validation entirely. */
+  skipModelValidation?: boolean;
+}
+
+export const loadArenaConfig = async (
+  configPath: string,
+  arenaName: string = DEFAULT_ARENA_NAME,
+  options: LoadArenaConfigOptions = {}
+): Promise<ArenaConfig> => {
   const raw = await readJsonFile<unknown>(configPath);
   const parsed = arenaConfigSchema.parse(raw);
   const normalizedVariants = parsed.variants.map((v) => normalizeVariant(v, arenaName));
 
-  return {
+  const config: ArenaConfig = {
     repoName: parsed.repoName,
     maxContinues: parsed.maxContinues,
     agentTimeoutMs: parsed.agentTimeoutMs,
     providers: parsed.providers,
     variants: normalizedVariants
   };
+
+  // Validate models if git root is available and validation not skipped
+  if (!options.skipModelValidation && options.gitRoot) {
+    await validateModels(config, options.gitRoot, options.executor);
+  }
+
+  return config;
 };
 
 export const findGitRoot = async (from?: string): Promise<string> => {
@@ -150,3 +173,40 @@ export const getVariantWorktreePath = (
   paths: ArenaPaths,
   variant: VariantConfig
 ): string => path.join(paths.worktreeDir, variant.name);
+
+/**
+ * Validate model names in all variants against discovered models.
+ * Throws with suggestions if an invalid model is found.
+ * Silently skips validation when discovery is unavailable.
+ */
+const validateModels = async (
+  config: ArenaConfig,
+  gitRoot: string,
+  executor?: CommandExecutor
+): Promise<void> => {
+  const registry = new ProviderRegistry(config.providers);
+  const cachePath = getModelCachePath(gitRoot);
+
+  // Discover models once per provider to avoid repeated cache I/O
+  const providerNames = new Set(config.variants.map((v) => v.provider));
+  const discoveredModels = new Map<string, string[] | null>();
+  for (const providerName of providerNames) {
+    discoveredModels.set(
+      providerName,
+      await registry.discoverModels(providerName, cachePath, executor)
+    );
+  }
+
+  const errors: string[] = [];
+  for (const variant of config.variants) {
+    const models = discoveredModels.get(variant.provider) ?? null;
+    if (models && !models.includes(variant.model)) {
+
+      errors.push(`Variant "${variant.name}": ${buildModelValidationError(variant.model, variant.provider, models)}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Model validation failed:\n${errors.join('\n\n')}`);
+  }
+};
