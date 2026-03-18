@@ -7,7 +7,7 @@ import { readJsonFile } from '../utils/files';
 import { arenaConfigSchema } from './schema';
 import { ProviderRegistry } from '../providers/registry';
 import { getModelCachePath } from '../providers/model-cache';
-import type { CommandExecutor } from '../providers/model-discovery';
+import { buildModelValidationError, type CommandExecutor } from '../providers/model-discovery';
 
 const execFileAsync = promisify(execFile);
 
@@ -186,17 +186,23 @@ const validateModels = async (
 ): Promise<void> => {
   const registry = new ProviderRegistry(config.providers);
   const cachePath = getModelCachePath(gitRoot);
-  const errors: string[] = [];
 
-  for (const variant of config.variants) {
-    const error = await registry.validateModel(
-      variant.provider,
-      variant.model,
-      cachePath,
-      executor
+  // Discover models once per provider to avoid repeated cache I/O
+  const providerNames = new Set(config.variants.map((v) => v.provider));
+  const discoveredModels = new Map<string, string[] | null>();
+  for (const providerName of providerNames) {
+    discoveredModels.set(
+      providerName,
+      await registry.discoverModels(providerName, cachePath, executor)
     );
-    if (error) {
-      errors.push(`Variant "${variant.name}": ${error}`);
+  }
+
+  const errors: string[] = [];
+  for (const variant of config.variants) {
+    const models = discoveredModels.get(variant.provider) ?? null;
+    if (models && !models.includes(variant.model)) {
+
+      errors.push(`Variant "${variant.name}": ${buildModelValidationError(variant.model, variant.provider, models)}`);
     }
   }
 

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { ProviderConfig } from '../domain/types';
 import { readJsonFile, writeJsonFile } from '../utils/files';
+import { withFileLock } from './trusted-folders';
 import { discoverModels, type CommandExecutor } from './model-discovery';
 
 const DEFAULT_TTL_MS = 3_600_000; // 1 hour
@@ -33,13 +34,15 @@ export const loadModelCache = async (cachePath: string): Promise<ModelCache> => 
 };
 
 /**
- * Save the model cache to disk.
+ * Save the model cache to disk with file locking for cross-process safety.
  */
 export const saveModelCache = async (
   cachePath: string,
   cache: ModelCache
 ): Promise<void> => {
-  await writeJsonFile(cachePath, cache);
+  await withFileLock(cachePath, async () => {
+    await writeJsonFile(cachePath, cache);
+  });
 };
 
 /**
