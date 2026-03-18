@@ -8,6 +8,10 @@ export type AgentStatus =
   | 'failed'
   | 'killed';
 
+/** Terminal statuses that must never revert to a non-terminal status. */
+export const isTerminalStatus = (status: AgentStatus): boolean =>
+  status === 'completed' || status === 'failed' || status === 'killed';
+
 export interface CompletionProtocol {
   idleTimeoutMs: number;
   maxChecks: number;

@@ -7,6 +7,7 @@ import type {
   Logger,
   VariantWorkspace
 } from '../domain/types';
+import { isTerminalStatus } from '../domain/types';
 import { buildLaunchPrompt, buildStatusCheckPrompt } from '../prompt/builder';
 import { ProviderRegistry, buildProviderCommand } from '../providers/registry';
 import { ensureTrustedFolder, registerTrustedFolders } from '../providers/trusted-folders';
@@ -231,6 +232,9 @@ export class ArenaOrchestrator extends EventEmitter<{
 
   private armTimers(agentName: string): void {
     const agent = this.getAgent(agentName);
+    if (isTerminalStatus(agent.status)) {
+      return;
+    }
     this.clearTimers(agent);
 
     const provider = this.registry.get(agent.workspace.variant.provider);
@@ -260,6 +264,9 @@ export class ArenaOrchestrator extends EventEmitter<{
 
   private handleData(agentName: string, chunk: string): void {
     const agent = this.getAgent(agentName);
+    if (isTerminalStatus(agent.status)) {
+      return;
+    }
     agent.outputBuffer.append(chunk);
     this.emit('message', { type: 'agent-output', agent: agentName, chunk });
 
@@ -292,7 +299,7 @@ export class ArenaOrchestrator extends EventEmitter<{
 
   private handleIdle(agentName: string): void {
     const agent = this.getAgent(agentName);
-    if (!agent.process) {
+    if (!agent.process || isTerminalStatus(agent.status)) {
       return;
     }
 
@@ -300,7 +307,7 @@ export class ArenaOrchestrator extends EventEmitter<{
     this.setStatus(agent, 'idle');
     agent.process.write(`${buildStatusCheckPrompt(provider.completionProtocol)}\r`);
     agent.responseTimer = setTimeout(() => {
-      if (agent.status !== 'completed' && agent.status !== 'failed' && agent.status !== 'killed') {
+      if (!isTerminalStatus(agent.status)) {
         agent.checksPerformed += 1;
         if (agent.checksPerformed >= provider.completionProtocol.maxChecks) {
           void this.completeAgent(agentName, agent.exitCode ?? 0);
@@ -315,7 +322,7 @@ export class ArenaOrchestrator extends EventEmitter<{
 
   private handleExit(agentName: string, exitCode: number): void {
     const agent = this.getAgent(agentName);
-    if (agent.status === 'completed' || agent.status === 'failed' || agent.status === 'killed') {
+    if (isTerminalStatus(agent.status)) {
       return;
     }
 
@@ -400,6 +407,7 @@ export class ArenaOrchestrator extends EventEmitter<{
     agent.exitCode = exitCode;
     agent.completedAt = this.now();
     this.clearTimers(agent);
+    this.setStatus(agent, 'completed');
 
     // Terminate the PTY process to prevent child process leaks
     if (agent.process && agent.pid) {
@@ -410,8 +418,6 @@ export class ArenaOrchestrator extends EventEmitter<{
         this.logger.warn('Failed to terminate completed agent process', { agent: agentName, pid: agent.pid });
       }
     }
-
-    this.setStatus(agent, 'completed');
   }
 
   private async failAgent(agentName: string, error: string, exitCode = 1): Promise<void> {
@@ -420,6 +426,7 @@ export class ArenaOrchestrator extends EventEmitter<{
     agent.exitCode = exitCode;
     agent.completedAt = this.now();
     this.clearTimers(agent);
+    this.setStatus(agent, 'failed');
     if (agent.pid) {
       try {
         await this.processTerminator(agent.pid);
@@ -427,12 +434,11 @@ export class ArenaOrchestrator extends EventEmitter<{
         this.logger.warn('Failed terminating process tree', { agent: agentName, pid: agent.pid });
       }
     }
-    this.setStatus(agent, 'failed');
   }
 
   private setStatus(agent: ManagedAgent, status: AgentStatus): void {
     agent.status = status;
-    if (status === 'completed' || status === 'failed' || status === 'killed') {
+    if (isTerminalStatus(status)) {
       agent.completedAt = agent.completedAt ?? this.now();
     }
     this.emitState(agent);
