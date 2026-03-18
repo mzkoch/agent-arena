@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${ARENA_REPO:-agent-arena/agent-arena}"
+REPO="${ARENA_REPO:-mzkoch/agent-arena}"
 VERSION="${ARENA_VERSION:-latest}"
 INSTALL_DIR="${ARENA_INSTALL_DIR:-/usr/local/bin}"
 

@@ -1,7 +1,7 @@
 class Arena < Formula
   desc "Run multiple autonomous coding agents in isolated git worktrees"
-  homepage "https://github.com/agent-arena/agent-arena"
-  head "https://github.com/agent-arena/agent-arena.git", branch: "main"
+  homepage "https://github.com/mzkoch/agent-arena"
+  head "https://github.com/mzkoch/agent-arena.git", branch: "main"
   license "MIT"
 
   depends_on "node"

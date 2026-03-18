@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$Repo = if ($env:ARENA_REPO) { $env:ARENA_REPO } else { "agent-arena/agent-arena" }
+$Repo = if ($env:ARENA_REPO) { $env:ARENA_REPO } else { "mzkoch/agent-arena" }
 $Version = if ($env:ARENA_VERSION) { $env:ARENA_VERSION } else { "latest" }
 $InstallDir = if ($env:ARENA_INSTALL_DIR) { $env:ARENA_INSTALL_DIR } else { "$HOME\AppData\Local\Programs\arena" }
 
