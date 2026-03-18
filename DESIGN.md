@@ -28,7 +28,11 @@ my-project/
 │   │   ├── logs/                 # agent logs
 │   │   └── worktrees/
 │   │       ├── variant-a/        # git worktree (branch: arena/default/variant-a)
+│   │       │   ├── .arena/       # REQUIREMENTS.md & ARENA-INSTRUCTIONS.md (gitignored)
+│   │       │   └── ...
 │   │       └── variant-b/        # git worktree (branch: arena/default/variant-b)
+│   │           ├── .arena/
+│   │           └── ...
 │   └── experiment/               # a second arena
 │       ├── arena.json
 │       ├── requirements.md
@@ -73,7 +77,13 @@ All CLI commands work with zero positional arguments when a single arena exists.
 2. Scan `.arena/` for named subdirectories containing `arena.json`
 3. If exactly one exists, use it; if none exist, default to "default"; if multiple exist, require an explicit name
 
-No `--config` or `--requirements` flags are needed. The `init` command optionally accepts `--config` and `--requirements` to copy external files into the arena; without them, it scaffolds a default config.
+The workflow is split into three phases:
+
+1. `arena init` — one-time project setup (creates `.arena/` directory and `.gitignore` entry)
+2. `arena create [name]` — scaffolds or copies config and requirements into `.arena/<name>/`
+3. `arena launch [name]` — creates worktrees, writes variant files, and starts agents
+
+This separation allows users to edit config and requirements freely before committing to worktrees.
 
 ### 5. Separate CLI from library modules
 
@@ -109,7 +119,7 @@ The orchestrator emits full agent state updates and incremental output chunks. T
 ```text
 src/
   cli.ts                     Commander entrypoint
-  cli/runtime.ts             command helpers for init/load/cleanup
+  cli/runtime.ts             command helpers: projectInit, createArena, setupWorkspacesForLaunch, listArenas, acceptVariant, checkUnmergedWork
   config/                    Zod schemas and config/path resolution
   domain/                    shared types
   evaluation/                worktree scoring and markdown report generation

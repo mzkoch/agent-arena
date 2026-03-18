@@ -27,7 +27,7 @@ describe('prompt builder', () => {
   });
 
   it('builds launch and status prompts', () => {
-    expect(buildLaunchPrompt()).toMatch(/Read REQUIREMENTS\.md/);
+    expect(buildLaunchPrompt()).toMatch(/Read \.arena\/REQUIREMENTS\.md/);
     expect(
       buildStatusCheckPrompt({
         idleTimeoutMs: 1,

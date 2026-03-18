@@ -16,7 +16,7 @@ export const buildArenaInstructions = (
 
 ## Your Design Assignment
 
-You are one of several AI agents independently building a solution to the requirements in REQUIREMENTS.md.
+You are one of several AI agents independently building a solution to the requirements in .arena/REQUIREMENTS.md.
 Your implementation should be complete, production-ready, and elegant.
 
 ### Your Constraints
@@ -45,7 +45,7 @@ If still working, output:
 `;
 
 export const buildLaunchPrompt = (): string =>
-  'Read REQUIREMENTS.md and ARENA-INSTRUCTIONS.md in your working directory, then follow the instructions to build the complete solution. Begin now.';
+  'Read .arena/REQUIREMENTS.md and .arena/ARENA-INSTRUCTIONS.md in your working directory, then follow the instructions to build the complete solution. Begin now.';
 
 export const buildStatusCheckPrompt = (protocol: CompletionProtocol): string =>
   `Status check: if you have completed every deliverable, reply with ${protocol.doneMarker}. Otherwise reply with ${protocol.continueMarker}.`;
