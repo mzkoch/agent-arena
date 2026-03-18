@@ -207,7 +207,8 @@ export class GitRepositoryManager {
     branch: string,
     baseBranch: string
   ): Promise<boolean> {
-    return (await this.getCommitsAheadCount(gitRoot, branch, baseBranch)) > 0;
+    const count = await this.getCommitsAheadCount(gitRoot, branch, baseBranch);
+    return count !== 0; // -1 (failed comparison) treated as potentially ahead for safety
   }
 
   public async getCommitsAheadCount(
@@ -223,9 +224,10 @@ export class GitRepositoryManager {
       gitArgs(gitRoot, ['rev-list', '--count', `${baseBranch}..${branch}`])
     );
     if (result.exitCode !== 0) {
-      return 0;
+      return -1;
     }
-    return parseInt(result.stdout.trim(), 10);
+    const count = parseInt(result.stdout.trim(), 10);
+    return Number.isNaN(count) ? -1 : count;
   }
 
   public async getBranchSafetyIssues(
@@ -244,7 +246,9 @@ export class GitRepositoryManager {
       const reasons: string[] = [];
 
       const aheadOfBase = await this.getCommitsAheadCount(gitRoot, branch, baseBranch);
-      if (aheadOfBase > 0) {
+      if (aheadOfBase < 0) {
+        reasons.push(`unable to compare against ${baseBranch} (comparison failed)`);
+      } else if (aheadOfBase > 0) {
         reasons.push(`${aheadOfBase} commit(s) ahead of ${baseBranch}`);
       }
 
@@ -255,7 +259,9 @@ export class GitRepositoryManager {
       if (upstreamResult.exitCode === 0) {
         const upstream = upstreamResult.stdout.trim();
         const aheadOfUpstream = await this.getCommitsAheadCount(gitRoot, branch, upstream);
-        if (aheadOfUpstream > 0) {
+        if (aheadOfUpstream < 0) {
+          reasons.push('unable to compare against upstream (comparison failed)');
+        } else if (aheadOfUpstream > 0) {
           reasons.push(`${aheadOfUpstream} unpushed commit(s)`);
         }
       }

@@ -2,7 +2,7 @@
 
 ## Your Design Assignment
 
-You are one of several AI agents independently building a solution to the requirements in REQUIREMENTS.md.
+You are one of several AI agents independently building a solution to the requirements in .arena/REQUIREMENTS.md.
 Your implementation should be complete, production-ready, and elegant.
 
 ### Your Constraints
