@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ArenaConfig, Logger, VariantWorkspace } from '../domain/types';
 import { ArenaOrchestrator } from './arena-orchestrator';
+import { formatLaunchError } from './arena-orchestrator';
 import type { PtyFactory, PtyProcess } from './pty';
 import { saveModelCache } from '../providers/model-cache';
 
@@ -535,6 +536,111 @@ describe('ArenaOrchestrator', () => {
       expect(snapshotAfterTimeout.error).toBeUndefined();
 
       vi.useRealTimers();
+    });
+  });
+
+  describe('graceful agent failure on launch', () => {
+    it('fails the agent gracefully when ptyFactory throws (command not found)', async () => {
+      const ptyFactory: PtyFactory = () => {
+        throw new Error('"bad-command" not found in PATH — is the provider CLI installed and available?');
+      };
+      const errorFn = vi.fn();
+      const errorLogger: Logger = {
+        debug() {},
+        info() {},
+        warn() {},
+        error: errorFn
+      };
+
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', errorLogger, {
+        ptyFactory,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+
+      await vi.waitFor(() => {
+        const snapshot = orchestrator.getSnapshot();
+        expect(snapshot.agents[0]?.status).toBe('failed');
+      });
+
+      const snapshot = orchestrator.getSnapshot();
+      expect(snapshot.agents[0]?.error).toContain('not found in PATH');
+      expect(snapshot.agents[0]?.error).toContain('fake');
+      expect(errorFn).toHaveBeenCalled();
+    });
+
+    it('allows other agents to continue when one fails to launch', async () => {
+      const twoVariantConfig: ArenaConfig = {
+        ...config,
+        variants: [
+          {
+            name: 'alpha',
+            provider: 'fake',
+            model: 'gpt-5',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Testable',
+            branch: 'variant/alpha'
+          },
+          {
+            name: 'beta',
+            provider: 'fake',
+            model: 'gpt-5',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Testable',
+            branch: 'variant/beta'
+          }
+        ]
+      };
+
+      const twoWorkspaces: VariantWorkspace[] = [
+        { variant: twoVariantConfig.variants[0]!, worktreePath: '/tmp/alpha' },
+        { variant: twoVariantConfig.variants[1]!, worktreePath: '/tmp/beta' }
+      ];
+
+      let callCount = 0;
+      const betaPty = new FakePty();
+      const ptyFactory: PtyFactory = () => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('"fake" not found in PATH — is the provider CLI installed and available?');
+        }
+        return betaPty;
+      };
+
+      const orchestrator = new ArenaOrchestrator(twoVariantConfig, twoWorkspaces, '/tmp/project', logger, {
+        ptyFactory,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+
+      await vi.waitFor(() => {
+        const snapshot = orchestrator.getSnapshot();
+        expect(snapshot.agents[0]?.status).toBe('failed');
+      });
+
+      const snapshot = orchestrator.getSnapshot();
+      expect(snapshot.agents[0]?.status).toBe('failed');
+      expect(snapshot.agents[1]?.status).toBe('running');
+    });
+
+    it('includes provider name and install hint in error message', () => {
+      const error = new Error('"copilot" not found in PATH — is the provider CLI installed and available?');
+
+      const message = formatLaunchError('copilot-cli', 'copilot', error);
+      expect(message).toContain('copilot-cli');
+      expect(message).toContain('not found in PATH');
+      expect(message).toContain('Is GitHub Copilot CLI installed?');
+    });
+
+    it('formats error without hint for unknown providers', () => {
+      const error = new Error('"custom-tool" not found in PATH — is the provider CLI installed and available?');
+
+      const message = formatLaunchError('custom-provider', 'custom-tool', error);
+      expect(message).toContain('custom-provider');
+      expect(message).toContain('not found in PATH');
+      expect(message).not.toContain('Is GitHub Copilot');
     });
   });
 });
