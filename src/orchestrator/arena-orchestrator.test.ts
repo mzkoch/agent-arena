@@ -96,7 +96,7 @@ describe('ArenaOrchestrator', () => {
     });
 
     await orchestrator.startAll();
-    expect(fakePty.writes[0]).toMatch(/Read REQUIREMENTS\.md/);
+    expect(fakePty.writes[0]).toMatch(/Read \.arena\/REQUIREMENTS\.md/);
 
     fakePty.emitData('working\nDONE\n');
     // completeAgent is async — allow the termination promise to resolve

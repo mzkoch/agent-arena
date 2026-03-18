@@ -23,54 +23,31 @@ Install from npm:
 npm install -g agent-arena
 ```
 
-Create an `arena.json`:
+### 1. Initialize the project
 
-```json
-{
-  "variants": [
-    {
-      "name": "copilot-node",
-      "provider": "copilot-cli",
-      "model": "claude-sonnet-4.5",
-      "techStack": "Node.js, TypeScript, Express",
-      "designPhilosophy": "Favor clarity and fast iteration"
-    },
-    {
-      "name": "claude-fastify",
-      "provider": "claude-code",
-      "model": "sonnet",
-      "techStack": "Node.js, TypeScript, Fastify",
-      "designPhilosophy": "Optimize for strong boundaries and testability"
-    }
-  ]
-}
-```
-
-Create your requirements file:
-
-```bash
-cat > requirements.md <<'EOF'
-# Build a TODO API
-
-- CRUD for tasks
-- Tests
-- Docker support
-EOF
-```
-
-Initialize worktrees (from inside your git repository):
-
-```bash
-arena init --config arena.json --requirements requirements.md
-```
-
-Or scaffold a new arena with default config (edit `.arena/default/arena.json` and `.arena/default/requirements.md` afterwards):
+Run once per repository to create the `.arena/` directory and add it to `.gitignore`:
 
 ```bash
 arena init
 ```
 
-Launch with the TUI:
+### 2. Create an arena
+
+Scaffold a new arena with default config (edit `.arena/default/arena.json` and `.arena/default/requirements.md` afterwards):
+
+```bash
+arena create
+```
+
+Or create a named arena from existing files:
+
+```bash
+arena create my-experiment --config arena.json --requirements requirements.md
+```
+
+### 3. Launch agents
+
+Create worktrees and start agents with the TUI:
 
 ```bash
 arena launch
@@ -82,6 +59,8 @@ Launch headless, then monitor from another terminal:
 arena launch --headless
 arena monitor
 ```
+
+### 4. Evaluate and accept
 
 Check structured status:
 
@@ -95,10 +74,20 @@ Generate a comparison report:
 arena evaluate
 ```
 
-Clean worktrees and branches:
+Accept a winning variant:
+
+```bash
+arena accept my-experiment copilot-node
+```
+
+### 5. Clean up
+
+Clean worktrees and branches (with safety checks for unmerged work):
 
 ```bash
 arena clean
+arena clean --force        # skip unmerged work checks
+arena clean --keep-config  # keep arena.json and requirements.md
 ```
 
 ### Multiple Arenas
@@ -106,21 +95,23 @@ arena clean
 Run multiple concurrent arenas by providing a name:
 
 ```bash
-arena init my-experiment --config arena.json --requirements requirements.md
-arena init another-run --config arena2.json --requirements requirements2.md
+arena create alpha --config arena.json --requirements requirements.md
+arena create beta --config arena2.json --requirements requirements2.md
 
-arena launch my-experiment
-arena launch another-run --headless
-arena status my-experiment
-arena evaluate another-run
-arena clean my-experiment
+arena launch alpha
+arena launch beta --headless
+arena list
+arena status alpha
+arena evaluate beta
+arena accept alpha copilot-node
+arena clean beta
 ```
 
 When only one arena exists, the name is optional. When multiple arenas exist, you must specify which one to use.
 
 ## Project Layout
 
-After `arena init`, your project looks like:
+After `arena init` and `arena create`, your project looks like:
 
 ```
 my-project/
@@ -133,7 +124,11 @@ my-project/
 │       ├── logs/
 │       └── worktrees/
 │           ├── copilot-node/   # branch: arena/default/copilot-node
+│           │   ├── .arena/     # REQUIREMENTS.md & ARENA-INSTRUCTIONS.md (gitignored)
+│           │   └── ...         # agent's implementation files
 │           └── claude-fastify/ # branch: arena/default/claude-fastify
+│               ├── .arena/
+│               └── ...
 ├── src/
 ├── package.json
 └── .gitignore                  # .arena/ added automatically
@@ -141,27 +136,37 @@ my-project/
 
 Each variant worktree is a branch on your own repo (`arena/<name>`), so you can:
 
-- `git diff main..arena/copilot-node` to compare
-- `git merge arena/copilot-node` to adopt the winner
-- Open a GitHub PR from `arena/copilot-node` to `main`
+- `git diff main..arena/default/copilot-node` to compare
+- `git merge arena/default/copilot-node` to adopt the winner
+- Open a GitHub PR from `arena/default/copilot-node` to `main`
+
+Requirements and instructions are placed in `.arena/` inside each worktree (not at the worktree root) to prevent agents from accidentally committing them.
 
 ## CLI Reference
 
 | Command | Description |
 | --- | --- |
-| `arena init [name]` | Create `.arena/<name>/` with scaffolded or copied config and worktrees |
-| `arena launch [name] [--headless]` | Launch all agents with the TUI or in headless mode |
+| `arena init` | One-time project setup: create `.arena/` and add to `.gitignore` |
+| `arena create [name]` | Create a new arena with config and requirements templates |
+| `arena launch [name] [--headless]` | Create worktrees, write variant files, and start agents |
+| `arena list` | List all arenas and their status |
+| `arena accept <name> <variant>` | Create a clean branch from a winning variant |
 | `arena monitor [name]` | Attach the TUI to a running headless session |
 | `arena status [name]` | Print JSON state for the arena |
 | `arena evaluate [name]` | Scan worktrees and write comparison report |
-| `arena clean [name] [--keep-config]` | Remove worktrees, branches, and arena state |
+| `arena clean [name] [--keep-config] [--force]` | Remove worktrees safely |
 | `arena version` | Print the installed version |
 
-`init` options:
+`create` options:
 
 - `--config <path>` copies an existing arena.json into `.arena/<name>/`
 - `--requirements <path>` copies an existing requirements file into `.arena/<name>/`
 - Both must be provided together, or omit both to scaffold default files
+
+`clean` options:
+
+- `--keep-config` keeps arena.json and requirements.md
+- `--force` skips safety checks for unmerged work
 
 All commands auto-discover the arena from `.arena/`. When only one arena exists, the `[name]` argument is optional. When multiple arenas exist, you must specify which one.
 
@@ -210,6 +215,14 @@ Global flags:
 | `techStack` | Yes | — | Written into per-worktree instructions |
 | `designPhilosophy` | Yes | — | Written into per-worktree instructions |
 | `branch` | No | `arena/<name>` | Branch name for the worktree |
+
+### Arena name validation
+
+Arena names must be:
+- Lowercase alphanumeric with hyphens only
+- Start with a letter or digit
+- Maximum 64 characters
+- No path traversal characters (`.`, `/`, `\`)
 
 ## Provider System
 

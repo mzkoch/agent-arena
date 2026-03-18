@@ -163,11 +163,14 @@ export class GitRepositoryManager {
     requirementsContent: string,
     instructionsContent: string
   ): Promise<void> {
-    await writeTextFile(path.join(workspace.worktreePath, 'REQUIREMENTS.md'), requirementsContent);
-    await writeTextFile(
-      path.join(workspace.worktreePath, 'ARENA-INSTRUCTIONS.md'),
-      instructionsContent
-    );
+    const arenaDir = path.join(workspace.worktreePath, '.arena');
+    await ensureDir(arenaDir);
+    await writeTextFile(path.join(arenaDir, 'REQUIREMENTS.md'), requirementsContent);
+    await writeTextFile(path.join(arenaDir, 'ARENA-INSTRUCTIONS.md'), instructionsContent);
+  }
+
+  public async ensureWorktreeGitignore(worktreePath: string): Promise<void> {
+    await this.ensureGitignoreEntry(worktreePath, '.arena/');
   }
 
   public async deleteBranch(gitRoot: string, branch: string): Promise<void> {
@@ -179,6 +182,52 @@ export class GitRepositoryManager {
         `Failed to delete branch ${branch}`
       );
     }
+  }
+
+  public async createBranchFrom(
+    gitRoot: string,
+    newBranch: string,
+    sourceBranch: string
+  ): Promise<void> {
+    await ensureSuccess(
+      this.runner,
+      gitRoot,
+      ['branch', newBranch, sourceBranch],
+      `Failed to create branch ${newBranch} from ${sourceBranch}`
+    );
+  }
+
+  public async hasCommitsAheadOf(
+    gitRoot: string,
+    branch: string,
+    baseBranch: string
+  ): Promise<boolean> {
+    if (!(await branchExists(this.runner, gitRoot, branch))) {
+      return false;
+    }
+    const result = await this.runner.run(
+      'git',
+      gitArgs(gitRoot, ['rev-list', '--count', `${baseBranch}..${branch}`])
+    );
+    if (result.exitCode !== 0) {
+      return false;
+    }
+    return parseInt(result.stdout.trim(), 10) > 0;
+  }
+
+  public async getDefaultBranch(gitRoot: string): Promise<string> {
+    const result = await this.runner.run(
+      'git',
+      gitArgs(gitRoot, ['symbolic-ref', '--short', 'HEAD'])
+    );
+    if (result.exitCode === 0) {
+      return result.stdout.trim();
+    }
+    return 'main';
+  }
+
+  public async branchExists(gitRoot: string, branch: string): Promise<boolean> {
+    return branchExists(this.runner, gitRoot, branch);
   }
 
   public async clean(gitRoot: string, branches?: string[]): Promise<void> {

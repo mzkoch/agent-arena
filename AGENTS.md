@@ -17,15 +17,18 @@ All tests must pass with **>80% coverage** on business-logic code before pushing
 Use the CLI directly:
 
 ```bash
-arena init                                                    # scaffold default arena
-arena init --config arena.json --requirements requirements.md # copy existing files
-arena init my-arena --config arena.json --requirements req.md # named arena
+arena init                                                          # one-time project setup
+arena create                                                        # scaffold default arena
+arena create my-arena --config arena.json --requirements req.md     # named arena from files
 arena launch
 arena launch my-arena --headless
+arena list
 arena monitor
 arena status
 arena evaluate
+arena accept my-arena variant-name
 arena clean
+arena clean --force
 ```
 
 ## Corrections & Learning

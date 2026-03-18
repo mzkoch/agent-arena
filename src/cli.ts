@@ -14,10 +14,15 @@ import { LocalArenaController, RemoteArenaController } from './tui/controller';
 import { renderArenaApp } from './tui/render';
 import { hasActiveAgents } from './tui/state';
 import {
+  acceptVariant,
+  checkUnmergedWork,
+  createArena,
   ensureSessionFile,
-  initializeArena,
+  listArenas,
   loadRuntimeContext,
-  removeSessionFile
+  projectInit,
+  removeSessionFile,
+  setupWorkspacesForLaunch
 } from './cli/runtime';
 import type { ArenaSnapshot } from './domain/types';
 import { GitRepositoryManager } from './git/repository';
@@ -77,34 +82,36 @@ program
 
 program
   .command('init')
-  .argument('[name]', 'Arena name (default: "default")')
+  .description('One-time project setup: create .arena/ directory and add .arena/ to .gitignore')
+  .action(async () => {
+    const logger = createLogger(Boolean(program.opts().verbose));
+    const gitRoot = await findGitRoot();
+    await projectInit(gitRoot, logger);
+    process.stdout.write(`Initialized arena project at ${gitRoot}/.arena/\n`);
+  });
+
+program
+  .command('create')
+  .argument('[name]', 'Arena name (default: "default")', 'default')
   .option('--config <path>', 'Path to arena.json to copy into .arena/<name>/')
   .option('--requirements <path>', 'Path to requirements.md to copy into .arena/<name>/')
-  .action(async (name: string | undefined, options: { config?: string; requirements?: string }) => {
+  .description('Create a new named arena with config and requirements templates')
+  .action(async (name: string, options: { config?: string; requirements?: string }) => {
     const logger = createLogger(Boolean(program.opts().verbose));
     const gitRoot = await findGitRoot();
 
-    const hasBothSources = Boolean(options.config) && Boolean(options.requirements);
-    const hasEitherSource = Boolean(options.config) || Boolean(options.requirements);
-
-    if (hasEitherSource && !hasBothSources) {
-      throw new Error(
-        'Both --config and --requirements must be provided together, or omit both to scaffold a new arena.'
-      );
-    }
-
-    const context = await initializeArena(
+    const project = await createArena(
       gitRoot,
-      {
-        configSource: options.config,
-        requirementsSource: options.requirements,
-        arenaName: name
-      },
+      name,
+      { configSource: options.config, requirementsSource: options.requirements },
       logger
     );
 
     process.stdout.write(
-      `Initialized arena "${context.paths.arenaName}" at ${context.paths.arenaDir} with ${context.workspaces.length} worktrees.\n`
+      `Created arena "${project.paths.arenaName}" at ${project.paths.arenaDir}\n` +
+      `  Config: ${project.paths.configPath}\n` +
+      `  Requirements: ${project.paths.requirementsPath}\n` +
+      `  Variants: ${project.config.variants.map((v) => v.name).join(', ')}\n`
     );
   });
 
@@ -112,9 +119,12 @@ program
   .command('launch')
   .argument('[name]', 'Arena name')
   .option('--headless', 'Run without local TUI')
+  .description('Create worktrees and start agents')
   .action(async (name: string | undefined, options: { headless?: boolean }) => {
     const logger = createLogger(Boolean(program.opts().verbose));
     const context = await loadRuntimeContext(name, logger);
+
+    await setupWorkspacesForLaunch(context);
 
     const orchestrator = new ArenaOrchestrator(
       context.config,
@@ -194,8 +204,49 @@ program
   });
 
 program
+  .command('list')
+  .description('List all arenas and their status')
+  .action(async () => {
+    const logger = createLogger(Boolean(program.opts().verbose));
+    const gitRoot = await findGitRoot();
+    const arenas = await listArenas(gitRoot, logger);
+
+    if (arenas.length === 0) {
+      process.stdout.write('No arenas found. Run "arena create" to create one.\n');
+      return;
+    }
+
+    process.stdout.write('Arenas:\n');
+    for (const arena of arenas) {
+      process.stdout.write(
+        `  ${arena.name}  [${arena.status}]  ${arena.variantCount} variant(s)\n`
+      );
+    }
+  });
+
+program
+  .command('accept')
+  .argument('<name>', 'Arena name')
+  .argument('<variant>', 'Variant name to accept')
+  .description('Create a clean branch from a winning variant')
+  .action(async (name: string, variant: string) => {
+    const logger = createLogger(Boolean(program.opts().verbose));
+    const gitRoot = await findGitRoot();
+    const branch = await acceptVariant(gitRoot, name, variant, logger);
+
+    process.stdout.write(
+      `Created branch "${branch}" from variant "${variant}".\n\n` +
+      `Next steps:\n` +
+      `  1. git checkout ${branch}\n` +
+      `  2. Verify the implementation\n` +
+      `  3. Open a PR: gh pr create --base main --head ${branch}\n`
+    );
+  });
+
+program
   .command('monitor')
   .argument('[name]', 'Arena name')
+  .description('Attach TUI to a running headless session')
   .action(async (name: string | undefined) => {
     const logger = createLogger(Boolean(program.opts().verbose));
     const context = await loadRuntimeContext(name, logger);
@@ -211,6 +262,7 @@ program
 program
   .command('status')
   .argument('[name]', 'Arena name')
+  .description('Print JSON state for the arena')
   .action(async (name: string | undefined) => {
     const logger = createLogger(Boolean(program.opts().verbose));
     const context = await loadRuntimeContext(name, logger);
@@ -248,6 +300,7 @@ program
 program
   .command('evaluate')
   .argument('[name]', 'Arena name')
+  .description('Scan worktrees and write comparison report')
   .action(async (name: string | undefined) => {
     const logger = createLogger(Boolean(program.opts().verbose));
     const context = await loadRuntimeContext(name, logger);
@@ -260,9 +313,24 @@ program
   .command('clean')
   .argument('[name]', 'Arena name')
   .option('--keep-config', 'Keep arena.json and requirements.md')
-  .action(async (name: string | undefined, options: { keepConfig?: boolean }) => {
+  .option('--force', 'Skip safety checks for unmerged work')
+  .description('Remove worktrees safely')
+  .action(async (name: string | undefined, options: { keepConfig?: boolean; force?: boolean }) => {
     const logger = createLogger(Boolean(program.opts().verbose));
     const context = await loadRuntimeContext(name, logger);
+
+    if (!options.force) {
+      const warnings = await checkUnmergedWork(context.paths.gitRoot, context.config, logger);
+      if (warnings.length > 0) {
+        process.stderr.write('Warning: Unmerged work detected:\n');
+        for (const warning of warnings) {
+          process.stderr.write(`  - ${warning}\n`);
+        }
+        process.stderr.write('\nUse --force to skip safety checks.\n');
+        process.exitCode = 1;
+        return;
+      }
+    }
 
     const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
     const branches = context.config.variants.map((v) => v.branch);
