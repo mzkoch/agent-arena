@@ -5,9 +5,6 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-
 jobs:
   publish-npm:
     runs-on: ubuntu-latest
@@ -95,6 +92,8 @@ jobs:
 
   github-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - publish-npm
       - build-binaries
