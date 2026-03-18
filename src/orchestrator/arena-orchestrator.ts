@@ -24,6 +24,18 @@ import { nodePtyFactory } from './pty';
 /** Threshold in milliseconds for detecting early failures (likely bad model). */
 const EARLY_FAILURE_THRESHOLD_MS = 15_000;
 
+const builtinLaunchHints: Record<string, string> = {
+  'copilot-cli': 'Is GitHub Copilot CLI installed?',
+  'claude-code': 'Is Claude Code installed?'
+};
+
+export const formatLaunchError = (providerName: string, command: string, error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const hint = builtinLaunchHints[providerName];
+  const suffix = hint && message.includes('not found in PATH') ? ` ${hint}` : '';
+  return `Failed to launch "${command}" for provider "${providerName}": ${message}${suffix}`;
+};
+
 interface ManagedAgent {
   workspace: VariantWorkspace;
   status: AgentStatus;
@@ -154,12 +166,24 @@ export class ArenaOrchestrator extends EventEmitter<{
     agent.exitCode = undefined;
     agent.error = undefined;
 
-    const pty = this.ptyFactory(prompt.command, prompt.args, {
-      cwd: worktreePath,
-      env: process.env,
-      cols: 120,
-      rows: 40
-    });
+    let pty: PtyProcess;
+    try {
+      pty = this.ptyFactory(prompt.command, prompt.args, {
+        cwd: worktreePath,
+        env: process.env,
+        cols: 120,
+        rows: 40
+      });
+    } catch (error) {
+      this.logger.error('Failed to start agent process', {
+        agent: agentName,
+        provider: variant.provider,
+        command: prompt.command,
+        error
+      });
+      void this.failAgent(agentName, formatLaunchError(variant.provider, prompt.command, error));
+      return;
+    }
 
     agent.process = pty;
     agent.pid = pty.pid;

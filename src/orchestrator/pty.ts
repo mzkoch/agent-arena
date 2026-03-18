@@ -1,4 +1,5 @@
 import { spawn } from 'node-pty';
+import { resolveCommand } from '../utils/resolve-command';
 
 export interface PtyProcess {
   pid: number;
@@ -23,7 +24,7 @@ export type PtyFactory = (
 ) => PtyProcess;
 
 export const nodePtyFactory: PtyFactory = (command, args, options) =>
-  spawn(command, args, {
+  spawn(resolveCommand(command), args, {
     name: 'xterm-color',
     cols: options.cols ?? 120,
     rows: options.rows ?? 40,
