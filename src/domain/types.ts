@@ -124,10 +124,19 @@ export interface ArenaSessionFile {
 export interface EvaluationVariantMetrics {
   name: string;
   worktreePath: string;
+  baseRef: string;
+  hasChanges: boolean;
+  commitCount: number;
+  changedFileCount: number;
+  addedLineCount: number;
+  deletedLineCount: number;
+  newTestFileCount: number;
   fileCount: number;
   testFileCount: number;
   hasReadme: boolean;
   hasDesignDoc: boolean;
+  readmeChanged: boolean;
+  designDocChanged: boolean;
   score: number;
   notes: string[];
 }
@@ -135,6 +144,7 @@ export interface EvaluationVariantMetrics {
 export interface EvaluationReport {
   generatedAt: string;
   gitRoot: string;
+  baseRef: string;
   winner: string;
   variants: EvaluationVariantMetrics[];
   markdown: string;

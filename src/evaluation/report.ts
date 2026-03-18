@@ -1,10 +1,56 @@
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { EvaluationReport, EvaluationVariantMetrics, VariantWorkspace } from '../domain/types';
+import { NodeCommandRunner, type CommandRunner } from '../git/command-runner';
 import { writeTextFile } from '../utils/files';
 
 const isTestFile = (filePath: string): boolean =>
   /\.(test|spec)\.[cm]?[jt]sx?$/.test(filePath) || filePath.includes('__tests__');
+
+const baseRefCandidates = ['main', 'origin/main', 'master', 'origin/master'];
+
+const toPortablePath = (value: string): string => value.split(path.sep).join('/');
+
+const runGit = async (
+  runner: CommandRunner,
+  cwd: string,
+  args: string[],
+  errorMessage: string
+): Promise<string> => {
+  const result = await runner.run('git', args, { cwd });
+  if (result.exitCode !== 0) {
+    throw new Error(`${errorMessage}: ${result.stderr || result.stdout}`.trim());
+  }
+
+  return result.stdout.trim();
+};
+
+const gitRefExists = async (runner: CommandRunner, cwd: string, ref: string): Promise<boolean> => {
+  const result = await runner.run('git', ['rev-parse', '--verify', ref], { cwd });
+  return result.exitCode === 0;
+};
+
+const resolveBaseRef = async (runner: CommandRunner, gitRoot: string): Promise<string> => {
+  for (const candidate of baseRefCandidates) {
+    if (await gitRefExists(runner, gitRoot, candidate)) {
+      return candidate;
+    }
+  }
+
+  const originHead = await runner.run('git', ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], {
+    cwd: gitRoot
+  });
+  if (originHead.exitCode === 0) {
+    const resolved = originHead.stdout.trim().replace(/^refs\/remotes\//u, '');
+    if (resolved.length > 0 && (await gitRefExists(runner, gitRoot, resolved))) {
+      return resolved;
+    }
+  }
+
+  throw new Error(
+    'Unable to determine an evaluation base ref. Expected one of: main, origin/main, master, origin/master, or origin/HEAD.'
+  );
+};
 
 const walkFiles = async (directoryPath: string): Promise<string[]> => {
   const entries = await readdir(directoryPath, { withFileTypes: true });
@@ -26,62 +72,207 @@ const walkFiles = async (directoryPath: string): Promise<string[]> => {
   return files;
 };
 
+const listBaseFiles = async (
+  runner: CommandRunner,
+  gitRoot: string,
+  baseRef: string
+): Promise<Set<string>> => {
+  const stdout = await runGit(
+    runner,
+    gitRoot,
+    ['ls-tree', '-r', '--name-only', baseRef],
+    `Failed to list files for ${baseRef}`
+  );
+
+  return new Set(
+    stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+  );
+};
+
+const countLines = async (filePath: string): Promise<number> => {
+  const content = await readFile(filePath);
+  if (content.length === 0 || content.includes(0)) {
+    return 0;
+  }
+
+  return content.toString('utf8').split(/\r?\n/u).length;
+};
+
+const parseNumStat = (stdout: string): { addedLineCount: number; deletedLineCount: number } =>
+  stdout.split(/\r?\n/u).reduce(
+    (totals, line) => {
+      const [added, deleted] = line.split('\t');
+      if (!added || !deleted || added === '-' || deleted === '-') {
+        return totals;
+      }
+
+      return {
+        addedLineCount: totals.addedLineCount + Number.parseInt(added, 10),
+        deletedLineCount: totals.deletedLineCount + Number.parseInt(deleted, 10)
+      };
+    },
+    { addedLineCount: 0, deletedLineCount: 0 }
+  );
+
+const parsePaths = (stdout: string): string[] =>
+  stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+const collectVariantMetrics = async (
+  workspace: VariantWorkspace,
+  baseRef: string,
+  baseFiles: Set<string>,
+  runner: CommandRunner
+): Promise<Omit<EvaluationVariantMetrics, 'score' | 'notes'>> => {
+  const files = await walkFiles(workspace.worktreePath);
+  const relativeFiles = files.map((filePath) => toPortablePath(path.relative(workspace.worktreePath, filePath)));
+  const untrackedPaths = parsePaths(
+    await runGit(
+      runner,
+      workspace.worktreePath,
+      ['ls-files', '--others', '--exclude-standard'],
+      `Failed to list untracked files for ${workspace.variant.name}`
+    )
+  );
+  const diffPaths = parsePaths(
+    await runGit(
+      runner,
+      workspace.worktreePath,
+      ['diff', '--name-only', '--find-renames', baseRef, '--'],
+      `Failed to list changed files for ${workspace.variant.name}`
+    )
+  );
+  const { addedLineCount: trackedAddedLineCount, deletedLineCount: trackedDeletedLineCount } = parseNumStat(
+    await runGit(
+      runner,
+      workspace.worktreePath,
+      ['diff', '--numstat', '--find-renames', baseRef, '--'],
+      `Failed to collect line stats for ${workspace.variant.name}`
+    )
+  );
+  const commitCount = Number.parseInt(
+    await runGit(
+      runner,
+      workspace.worktreePath,
+      ['rev-list', '--count', `${baseRef}..HEAD`],
+      `Failed to count commits for ${workspace.variant.name}`
+    ),
+    10
+  );
+
+  let addedLineCount = trackedAddedLineCount;
+  for (const untrackedPath of untrackedPaths) {
+    addedLineCount += await countLines(path.join(workspace.worktreePath, untrackedPath));
+  }
+
+  const addedFiles = relativeFiles.filter((filePath) => !baseFiles.has(filePath));
+  const changedPaths = new Set([...diffPaths, ...untrackedPaths]);
+  const hasChanges = changedPaths.size > 0;
+
+  return {
+    name: workspace.variant.name,
+    worktreePath: workspace.worktreePath,
+    baseRef,
+    hasChanges,
+    commitCount,
+    changedFileCount: changedPaths.size,
+    addedLineCount,
+    deletedLineCount: trackedDeletedLineCount,
+    newTestFileCount: addedFiles.filter(isTestFile).length,
+    fileCount: files.length,
+    testFileCount: relativeFiles.filter(isTestFile).length,
+    hasReadme: relativeFiles.some((filePath) => path.basename(filePath).toLowerCase() === 'readme.md'),
+    hasDesignDoc: relativeFiles.some((filePath) => path.basename(filePath).toLowerCase() === 'design.md'),
+    readmeChanged: [...changedPaths].some((filePath) => path.basename(filePath).toLowerCase() === 'readme.md'),
+    designDocChanged: [...changedPaths].some((filePath) => path.basename(filePath).toLowerCase() === 'design.md')
+  };
+};
+
 export const scoreVariant = (metrics: Omit<EvaluationVariantMetrics, 'score' | 'notes'>): EvaluationVariantMetrics => {
   const notes: string[] = [];
-  let score = Math.min(metrics.fileCount, 20);
+  notes.push(`Compared against ${metrics.baseRef}`);
+  notes.push(`${metrics.commitCount} commits ahead of ${metrics.baseRef}`);
 
-  score += metrics.testFileCount * 3;
-  if (metrics.hasReadme) {
-    score += 10;
-    notes.push('README present');
-  } else {
-    notes.push('README missing');
+  if (!metrics.hasChanges) {
+    notes.push(`No changes detected relative to ${metrics.baseRef}`);
+    if (metrics.commitCount > 0) {
+      notes.push('Branch has commits ahead of the baseline, but its net diff is zero');
+    }
+
+    return {
+      ...metrics,
+      score: 0,
+      notes
+    };
   }
 
-  if (metrics.hasDesignDoc) {
-    score += 10;
-    notes.push('DESIGN.md present');
-  } else {
-    notes.push('DESIGN.md missing');
+  let score = 0;
+  score += Math.min(metrics.changedFileCount * 4, 40);
+  score += Math.min(metrics.commitCount * 5, 15);
+  score += Math.min(Math.floor((metrics.addedLineCount + metrics.deletedLineCount) / 10), 15);
+  score += Math.min(metrics.newTestFileCount * 12, 24);
+  if (metrics.readmeChanged) {
+    score += 3;
+  }
+  if (metrics.designDocChanged) {
+    score += 3;
   }
 
-  if (metrics.testFileCount === 0) {
-    notes.push('No test files detected');
+  notes.push(`${metrics.changedFileCount} changed files detected`);
+  notes.push(`${metrics.addedLineCount} lines added, ${metrics.deletedLineCount} lines deleted`);
+  if (metrics.newTestFileCount === 0) {
+    notes.push('No new test files added');
   } else {
-    notes.push(`${metrics.testFileCount} test files detected`);
+    notes.push(`${metrics.newTestFileCount} new test files added`);
   }
+  notes.push(metrics.hasReadme ? 'README present' : 'README missing');
+  notes.push(metrics.hasDesignDoc ? 'DESIGN.md present' : 'DESIGN.md missing');
+  notes.push(metrics.readmeChanged ? 'README changed' : 'README unchanged');
+  notes.push(metrics.designDocChanged ? 'DESIGN.md changed' : 'DESIGN.md unchanged');
 
   return {
     ...metrics,
-    score,
+    score: Math.min(score, 100),
     notes
   };
 };
 
 export const evaluateWorkspaces = async (
   gitRoot: string,
-  workspaces: VariantWorkspace[]
+  workspaces: VariantWorkspace[],
+  runner: CommandRunner = new NodeCommandRunner()
 ): Promise<EvaluationReport> => {
+  const baseRef = await resolveBaseRef(runner, gitRoot);
+  const baseFiles = await listBaseFiles(runner, gitRoot, baseRef);
   const variants = await Promise.all(
     workspaces.map(async (workspace) => {
-      const files = await walkFiles(workspace.worktreePath);
-      return scoreVariant({
-        name: workspace.variant.name,
-        worktreePath: workspace.worktreePath,
-        fileCount: files.length,
-        testFileCount: files.filter(isTestFile).length,
-        hasReadme: files.some((filePath) => path.basename(filePath).toLowerCase() === 'readme.md'),
-        hasDesignDoc: files.some((filePath) => path.basename(filePath).toLowerCase() === 'design.md')
-      });
+      const metrics = await collectVariantMetrics(workspace, baseRef, baseFiles, runner);
+      return scoreVariant(metrics);
     })
   );
 
-  const winner = [...variants].sort((left, right) => right.score - left.score)[0]?.name ?? 'n/a';
-  const markdown = renderComparisonReport(gitRoot, variants, winner);
+  const winner =
+    [...variants]
+      .filter((variant) => variant.hasChanges)
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          right.newTestFileCount - left.newTestFileCount ||
+          right.changedFileCount - left.changedFileCount ||
+          right.commitCount - left.commitCount ||
+          left.name.localeCompare(right.name)
+      )[0]?.name ?? 'n/a';
+  const markdown = renderComparisonReport(gitRoot, baseRef, variants, winner);
 
   return {
     generatedAt: new Date().toISOString(),
     gitRoot,
+    baseRef,
     winner,
     variants,
     markdown
@@ -90,6 +281,7 @@ export const evaluateWorkspaces = async (
 
 export const renderComparisonReport = (
   gitRoot: string,
+  baseRef: string,
   variants: EvaluationVariantMetrics[],
   winner: string
 ): string => `# Comparison Report
@@ -97,17 +289,20 @@ export const renderComparisonReport = (
 Generated: ${new Date().toISOString()}
 
 Repository: \`${gitRoot}\`
+Baseline: \`${baseRef}\`
 
 Recommended winner: **${winner}**
 
-| Variant | Score | Files | Tests | README | DESIGN |
-|---------|------:|------:|------:|:------:|:------:|
+| Variant | Status | Score | Commits | Changed Files | +Lines | -Lines | New Tests |
+|---------|:------:|------:|--------:|--------------:|-------:|-------:|----------:|
 ${variants
   .map(
     (variant) =>
-      `| ${variant.name} | ${variant.score} | ${variant.fileCount} | ${variant.testFileCount} | ${
-        variant.hasReadme ? 'Yes' : 'No'
-      } | ${variant.hasDesignDoc ? 'Yes' : 'No'} |`
+      `| ${variant.name} | ${variant.hasChanges ? 'Changed' : 'No changes'} | ${variant.score} | ${
+        variant.commitCount
+      } | ${variant.changedFileCount} | ${variant.addedLineCount} | ${variant.deletedLineCount} | ${
+        variant.newTestFileCount
+      } |`
   )
   .join('\n')}
 
@@ -118,7 +313,15 @@ ${variants
     (variant) => `### ${variant.name}
 
 - Worktree: \`${variant.worktreePath}\`
+- Baseline: \`${variant.baseRef}\`
+- Status: ${variant.hasChanges ? 'Produced changes' : 'No changes detected'}
 - Score: ${variant.score}
+- Commits ahead: ${variant.commitCount}
+- Changed files: ${variant.changedFileCount}
+- Line delta: +${variant.addedLineCount} / -${variant.deletedLineCount}
+- New test files: ${variant.newTestFileCount}
+- README: ${variant.hasReadme ? 'Present' : 'Missing'}${variant.readmeChanged ? ' (changed)' : ''}
+- DESIGN.md: ${variant.hasDesignDoc ? 'Present' : 'Missing'}${variant.designDocChanged ? ' (changed)' : ''}
 - Notes:
 ${variant.notes.map((note) => `  - ${note}`).join('\n')}`
   )

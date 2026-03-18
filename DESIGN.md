@@ -208,14 +208,18 @@ The monitor client receives a snapshot immediately on connect, then applies stre
 
 ## Evaluation Strategy
 
-Evaluation is intentionally lightweight and deterministic:
+Evaluation is intentionally lightweight, deterministic, and now anchored to actual git output instead of inherited repository contents.
 
-- total file count
-- test file count
-- `README.md` present
-- `DESIGN.md` present
+For each variant, the evaluator compares the worktree against a baseline branch (`main` when available, with compatibility fallbacks for common legacy setups) and records:
 
-The scorer produces a simple recommendation and writes `.arena/<name>/comparison-report.md`.
+- whether the worktree has any net diff from the baseline
+- commit count ahead of the baseline
+- changed file count
+- added and deleted line totals
+- newly added test files versus the baseline
+- README and DESIGN presence/change status for context
+
+Zero-diff variants are explicitly marked as `No changes` and receive a score of `0`, even if they inherit a large repository or have intermediate commits that net out to no diff. Changed variants are ranked using the diff-aware metrics above, and the evaluator writes the resulting comparison report to `.arena/<name>/comparison-report.md`.
 
 ## Dynamic Model Validation
 
