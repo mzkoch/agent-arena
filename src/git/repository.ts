@@ -369,10 +369,12 @@ export class GitRepositoryManager {
       'git',
       gitArgs(gitRoot, ['ls-remote', '--refs', remote, ...patterns])
     );
-    const refs = new Map<string, string>();
     if (result.exitCode !== 0) {
-      return refs;
+      throw new Error(
+        `Failed to list remote refs from ${remote}: ${(result.stderr || result.stdout).trim() || `exit code ${result.exitCode}`}`
+      );
     }
+    const refs = new Map<string, string>();
     for (const line of result.stdout.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
@@ -404,19 +406,24 @@ export class GitRepositoryManager {
     ghAvailable: boolean
   ): Promise<boolean> {
     if (ghAvailable) {
-      const result = await this.runner.run(
-        'gh',
-        ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number', '--limit', '1'],
-        { cwd: gitRoot }
-      );
-      if (result.exitCode === 0) {
-        const output = result.stdout.trim();
-        if (output.length > 0 && output !== '[]') {
-          return true;
+      try {
+        const result = await this.runner.run(
+          'gh',
+          ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number', '--limit', '1'],
+          { cwd: gitRoot }
+        );
+        if (result.exitCode === 0) {
+          try {
+            const parsed: unknown = JSON.parse(result.stdout.trim());
+            return Array.isArray(parsed) && parsed.length > 0;
+          } catch {
+            // JSON parse failed — fall through to OID matching
+          }
         }
-        return false;
+        // gh exited non-zero — fall through to OID matching
+      } catch {
+        // gh spawn failed (e.g. ENOENT) — fall through to OID matching
       }
-      // gh failed for this branch — fall through to OID matching
     }
 
     // OID-based PR detection fallback

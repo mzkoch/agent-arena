@@ -97,12 +97,27 @@ export const planRemoteCleanup = async (
   }
 
   // Single ls-remote call for all needed refs
-  const remoteRefs = await repository.listRemoteRefs(gitRoot, remote, [
-    `refs/pull/*/head`,
-    `refs/heads/arena/${arenaName}/*`,
-    `refs/heads/accept/${arenaName}/*`,
-    `refs/tags/accept/${arenaName}/*`
-  ]);
+  let remoteRefs: Map<string, string>;
+  try {
+    remoteRefs = await repository.listRemoteRefs(gitRoot, remote, [
+      `refs/pull/*/head`,
+      `refs/heads/arena/${arenaName}/*`,
+      `refs/heads/accept/${arenaName}/*`,
+      `refs/tags/accept/${arenaName}/*`
+    ]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn('Failed to list remote refs, skipping remote branch cleanup', { remote, error: message });
+    return {
+      remoteReachable: false,
+      remote,
+      toDelete: [],
+      toSkip: branches.map((branch) => ({
+        branch,
+        reason: 'failed to list remote refs'
+      }))
+    };
+  }
 
   // Upfront gh availability check (single call before the branch loop)
   let ghAvailable = false;

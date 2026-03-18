@@ -349,6 +349,21 @@ program
     });
 
     if (plan.toDelete.length > 0 || plan.toSkip.length > 0) {
+      // Print plan BEFORE executing deletions
+      if (plan.toDelete.length > 0) {
+        process.stdout.write('Remote branches to delete:\n');
+        for (const branch of plan.toDelete) {
+          process.stdout.write(`  - ${branch}\n`);
+        }
+      }
+      if (plan.toSkip.length > 0) {
+        process.stdout.write('Remote branches to skip:\n');
+        for (const entry of plan.toSkip) {
+          process.stdout.write(`  - ${entry.branch} (${entry.reason})\n`);
+        }
+      }
+
+      // Execute deletions
       const result = await executeRemoteCleanup({
         repository,
         gitRoot: context.paths.gitRoot,
@@ -356,6 +371,7 @@ program
         logger
       });
 
+      // Print outcome
       const summary = formatRemoteCleanupResult(result);
       if (summary.length > 0) {
         process.stdout.write(`${summary}\n`);

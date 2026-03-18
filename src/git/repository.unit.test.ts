@@ -125,14 +125,15 @@ describe('GitRepositoryManager - listRemoteRefs', () => {
     expect(refs.size).toBe(0);
   });
 
-  it('returns empty map on failure', async () => {
+  it('throws on failure', async () => {
     const runner = createMockRunner([
       { result: { exitCode: 128, stdout: '', stderr: 'fatal: error' } }
     ]);
     const manager = new GitRepositoryManager(runner, silentLogger);
 
-    const refs = await manager.listRemoteRefs('/repo', 'origin', ['refs/heads/*']);
-    expect(refs.size).toBe(0);
+    await expect(
+      manager.listRemoteRefs('/repo', 'origin', ['refs/heads/*'])
+    ).rejects.toThrow(/Failed to list remote refs/);
   });
 
   it('passes patterns to ls-remote command', async () => {
@@ -221,7 +222,7 @@ describe('GitRepositoryManager - hasOpenPullRequest', () => {
       {
         result: {
           exitCode: 0,
-          stdout: '1\tMy PR\tarena/test/variant-a\tOPEN\n',
+          stdout: '[{"number":1}]',
           stderr: ''
         }
       }
