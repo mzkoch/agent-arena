@@ -51,6 +51,11 @@ describe('GitRepositoryManager', () => {
       '# instructions'
     );
 
+    const req = await readFile(path.join(worktreePath, '.arena', 'REQUIREMENTS.md'), 'utf8');
+    expect(req).toBe('# requirements');
+    const instr = await readFile(path.join(worktreePath, '.arena', 'ARENA-INSTRUCTIONS.md'), 'utf8');
+    expect(instr).toBe('# instructions');
+
     const worktrees = await manager.listWorktrees(gitRoot);
     const canonicalWorktreePath = await realpath(worktreePath);
     expect(worktrees.some((entry) => entry.path === canonicalWorktreePath)).toBe(true);
@@ -126,5 +131,54 @@ describe('GitRepositoryManager', () => {
     const canonicalUser = await realpath(userWorktree);
     expect(after.some((entry) => entry.path === canonicalUser)).toBe(true);
     expect(after.some((entry) => entry.branch === 'arena/gamma')).toBe(false);
+  }, 15_000);
+
+  it('checks branch existence', async () => {
+    const gitRoot = await createGitRepo();
+    const manager = new GitRepositoryManager(new NodeCommandRunner(), silentLogger);
+
+    expect(await manager.branchExists(gitRoot, 'nonexistent')).toBe(false);
+
+    const worktreePath = path.join(gitRoot, '.arena', 'worktrees', 'check');
+    await manager.createWorktree(gitRoot, 'arena/check', worktreePath);
+    expect(await manager.branchExists(gitRoot, 'arena/check')).toBe(true);
+  }, 15_000);
+
+  it('creates a branch from another branch', async () => {
+    const gitRoot = await createGitRepo();
+    const manager = new GitRepositoryManager(new NodeCommandRunner(), silentLogger);
+
+    const worktreePath = path.join(gitRoot, '.arena', 'worktrees', 'src');
+    await manager.createWorktree(gitRoot, 'arena/src', worktreePath);
+
+    await manager.createBranchFrom(gitRoot, 'accept/my/src', 'arena/src');
+    expect(await manager.branchExists(gitRoot, 'accept/my/src')).toBe(true);
+  }, 15_000);
+
+  it('detects commits ahead of a base branch', async () => {
+    const gitRoot = await createGitRepo();
+    const manager = new GitRepositoryManager(new NodeCommandRunner(), silentLogger);
+
+    const defaultBranch = await manager.getDefaultBranch(gitRoot);
+
+    const worktreePath = path.join(gitRoot, '.arena', 'worktrees', 'ahead');
+    await manager.createWorktree(gitRoot, 'arena/ahead', worktreePath);
+
+    expect(await manager.hasCommitsAheadOf(gitRoot, 'arena/ahead', defaultBranch)).toBe(false);
+
+    await execFileAsync('git', ['-C', worktreePath, '-c', 'user.name=Test', '-c', 'user.email=test@test.com', 'commit', '--allow-empty', '-m', 'ahead']);
+    expect(await manager.hasCommitsAheadOf(gitRoot, 'arena/ahead', defaultBranch)).toBe(true);
+  }, 15_000);
+
+  it('adds .arena/ to worktree .gitignore', async () => {
+    const gitRoot = await createGitRepo();
+    const manager = new GitRepositoryManager(new NodeCommandRunner(), silentLogger);
+
+    const worktreePath = path.join(gitRoot, '.arena', 'worktrees', 'gi');
+    await manager.createWorktree(gitRoot, 'arena/gi', worktreePath);
+    await manager.ensureWorktreeGitignore(worktreePath);
+
+    const gitignore = await readFile(path.join(worktreePath, '.gitignore'), 'utf8');
+    expect(gitignore).toContain('.arena/');
   }, 15_000);
 });

@@ -37,7 +37,15 @@ const countLines = async (filePath: string): Promise<number> => {
     return 0;
   }
 
-  return content.toString('utf8').split(/\r?\n/u).length;
+  const text = content.toString('utf8');
+  let count = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\n') {
+      count++;
+    }
+  }
+
+  return count;
 };
 
 const parseNumStat = (stdout: string): { addedLineCount: number; deletedLineCount: number } =>
