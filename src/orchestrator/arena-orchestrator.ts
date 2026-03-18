@@ -404,6 +404,9 @@ export class ArenaOrchestrator extends EventEmitter<{
 
   private async completeAgent(agentName: string, exitCode: number): Promise<void> {
     const agent = this.getAgent(agentName);
+    if (isTerminalStatus(agent.status)) {
+      return;
+    }
     agent.exitCode = exitCode;
     agent.completedAt = this.now();
     this.clearTimers(agent);
@@ -422,6 +425,9 @@ export class ArenaOrchestrator extends EventEmitter<{
 
   private async failAgent(agentName: string, error: string, exitCode = 1): Promise<void> {
     const agent = this.getAgent(agentName);
+    if (isTerminalStatus(agent.status)) {
+      return;
+    }
     agent.error = error;
     agent.exitCode = exitCode;
     agent.completedAt = this.now();

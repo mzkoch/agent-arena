@@ -479,5 +479,62 @@ describe('ArenaOrchestrator', () => {
 
       vi.useRealTimers();
     });
+
+
+    it('absolute timer firing after completion does not overwrite terminal status', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+
+      // Complete via done marker
+      fakePty.emitData('DONE\n');
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      // Advance past the absolute timeout — failAgent must not overwrite completed
+      await vi.advanceTimersByTimeAsync(config.agentTimeoutMs + 1000);
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+
+      vi.useRealTimers();
+    });
+
+    it('failAgent is idempotent — does not corrupt already-completed agent state', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      let currentTime = 1000;
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        now: () => currentTime
+      });
+
+      await orchestrator.startAll();
+
+      // Complete the agent
+      fakePty.emitData('DONE\n');
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      const snapshotAfterComplete = orchestrator.getSnapshot().agents[0]!;
+
+      // Advance time and trigger absolute timeout
+      currentTime = 1000 + config.agentTimeoutMs + 5000;
+      await vi.advanceTimersByTimeAsync(config.agentTimeoutMs + 5000);
+
+      // Status, exitCode, and completedAt must remain unchanged
+      const snapshotAfterTimeout = orchestrator.getSnapshot().agents[0]!;
+      expect(snapshotAfterTimeout.status).toBe('completed');
+      expect(snapshotAfterTimeout.exitCode).toBe(snapshotAfterComplete.exitCode);
+      expect(snapshotAfterTimeout.error).toBeUndefined();
+
+      vi.useRealTimers();
+    });
   });
 });
