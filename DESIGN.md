@@ -258,6 +258,30 @@ Invalid model "gemini-3-pro" for provider "copilot-cli". Did you mean "gemini-3-
 - `modelDiscovery?: { command, args, parseStrategy }` — how to discover models at runtime
 - `supportedModels?: string[]` — static fallback list
 
+## Remote Branch Cleanup
+
+### Architecture
+
+Remote branch cleanup follows a three-layer architecture:
+
+1. **CLI** (`src/cli.ts`) — Integrates the `--keep-remote` and `--force` flags, calls the orchestrator, prints plan/result summaries, sets `process.exitCode = 1` on errors.
+2. **Orchestrator** (`src/git/remote-cleanup.ts`) — Implements a plan/execute split. The plan phase classifies branches into delete/skip lists without performing mutations. The execute phase performs deletions and collects per-branch results.
+3. **Repository primitives** (`src/git/repository.ts`) — Provides `isRemoteReachable()`, `listRemoteRefs()`, `deleteRemoteBranch()`, `hasOpenPullRequest()`, and `isGhAvailable()` as methods on `GitRepositoryManager`.
+
+### Key Design Decisions
+
+- **Single `ls-remote --refs` call**: All needed refs (arena branches, accept refs, PR refs) are fetched in one network round-trip for efficiency.
+- **Dual PR detection**: An upfront `gh auth status` check determines if GitHub CLI is available. If so, `gh pr list --head <branch>` is used per branch (with per-branch fallback to OID matching on failure). If not, OID matching against `refs/pull/*/head` is used for all branches.
+- **Plan/execute split**: The user sees what will happen before any deletions start. The plan classifies branches; the execute phase acts on the plan. This gives transparency and testability.
+- **Thorough accepted-variant detection**: Checks local branch, local tag, remote branch, and remote tag for `accept/<arena>/<variant>` refs.
+- **Per-branch error resilience**: Failures on individual branch deletions are collected, not thrown. Remaining branches are still processed.
+- **Remote cleanup before local cleanup**: Remote branch deletion runs before local worktree/branch cleanup so local tracking refs remain available for debugging.
+
+### CLI Flags
+
+- `--keep-remote` — Opt out of remote branch deletion (preserves pre-feature behavior).
+- `--force` — Skips unmerged-work safety checks AND deletes remote branches with open PRs (still never deletes accepted branches).
+
 ## Trade-offs
 
 - The release packaging workflow is optimized for npm distribution first, with standalone binaries built in the release pipeline as a secondary channel.
