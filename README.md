@@ -359,7 +359,7 @@ npm install -g agent-arena
 The repository includes `Formula/arena.rb`. If you publish a tap:
 
 ```bash
-brew tap <your-org>/tools
+brew tap mzkoch/tools
 brew install arena
 ```
 
@@ -368,13 +368,13 @@ brew install arena
 Unix:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<repo>/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mzkoch/agent-arena/main/scripts/install.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/<repo>/main/scripts/install.ps1 -useb | iex
+iwr https://raw.githubusercontent.com/mzkoch/agent-arena/main/scripts/install.ps1 -useb | iex
 ```
 
 Both scripts detect OS and architecture, then download the matching release artifact.
