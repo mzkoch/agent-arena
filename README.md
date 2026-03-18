@@ -20,7 +20,7 @@ When you want several AI agents to compete on the same project brief, you usuall
 Install from npm:
 
 ```bash
-npm install -g agent-arena
+npm install -g @mzkoch/agent-arena
 ```
 
 ### 1. Initialize the project
@@ -355,7 +355,7 @@ For the deeper design rationale, see [`DESIGN.md`](./DESIGN.md).
 ### npm
 
 ```bash
-npm install -g agent-arena
+npm install -g @mzkoch/agent-arena
 ```
 
 ### Homebrew

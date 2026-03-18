@@ -1,5 +1,5 @@
 {
-  "name": "agent-arena",
+  "name": "@mzkoch/agent-arena",
   "version": "0.1.0",
   "type": "module",
   "description": "Cross-platform CLI for running competing autonomous coding agents in isolated git worktrees.",
@@ -27,7 +27,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "validate": "npm run lint && npm run build && npm run test:coverage",
+    "validate": "npm run lint && npm run typecheck && npm run build && npm run test:coverage",
     "package:binaries": "npm run build && npx @yao-pkg/pkg dist/cli.js --targets node20-linux-x64,node20-linux-arm64,node20-macos-x64,node20-macos-arm64,node20-win-x64 --out-path release"
   },
   "pkg": {
