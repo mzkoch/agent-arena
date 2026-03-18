@@ -21,6 +21,11 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
       strategy: 'flat-array',
       configFile: '~/.copilot/config.json',
       jsonKey: 'trusted_folders'
+    },
+    modelDiscovery: {
+      command: 'copilot',
+      args: ['--help'],
+      parseStrategy: 'choices-flag'
     }
   },
   'claude-code': {

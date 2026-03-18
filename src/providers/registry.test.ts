@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { ProviderConfig, VariantConfig } from '../domain/types';
 import { ProviderRegistry, buildProviderCommand } from './registry';
+import { saveModelCache } from './model-cache';
 
 const variant: VariantConfig = {
   name: 'demo',
@@ -66,5 +70,82 @@ describe('ProviderRegistry', () => {
 
     expect(positional.args.at(-1)).toBe('hello');
     expect(stdin.stdinPayload).toBe('hello\n');
+  });
+
+  it('discovers models via registry method using cache', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'registry-disc-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      'copilot-cli': {
+        models: ['gpt-5', 'gpt-5.1'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    const registry = new ProviderRegistry();
+    const models = await registry.discoverModels('copilot-cli', cachePath);
+    expect(models).toEqual(['gpt-5', 'gpt-5.1']);
+  });
+
+  it('validates model returns null for valid model', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'registry-val-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      'copilot-cli': {
+        models: ['gpt-5', 'gpt-5.1'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    const registry = new ProviderRegistry();
+    const error = await registry.validateModel('copilot-cli', 'gpt-5', cachePath);
+    expect(error).toBeNull();
+  });
+
+  it('validates model returns error for invalid model', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'registry-val-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      'copilot-cli': {
+        models: ['gpt-5', 'gpt-5.1'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    const registry = new ProviderRegistry();
+    const error = await registry.validateModel('copilot-cli', 'bad-model', cachePath);
+    expect(error).toContain('Invalid model "bad-model"');
+    expect(error).toContain('copilot-cli');
+  });
+
+  it('findClosestModel returns closest match', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'registry-close-'));
+    const arenaDir = path.join(tempDir, '.arena');
+    await mkdir(arenaDir, { recursive: true });
+
+    const cachePath = path.join(arenaDir, '.model-cache.json');
+    await saveModelCache(cachePath, {
+      'copilot-cli': {
+        models: ['gpt-5', 'gemini-3-pro-preview'],
+        discoveredAt: new Date().toISOString(),
+        ttlMs: 3600000
+      }
+    });
+
+    const registry = new ProviderRegistry();
+    const closest = await registry.findClosestModel('copilot-cli', 'gemini-3-pro', cachePath);
+    expect(closest).toBe('gemini-3-pro-preview');
   });
 });

@@ -266,6 +266,39 @@ The `trustedFolders` field is optional. When set, the arena pre-registers each w
 - `flat-array`: folder path is appended to a JSON array (e.g. copilot-cli)
 - `nested-object`: folder path becomes a key in a nested object with a boolean flag (e.g. claude-code). Requires an additional `nestedKey` field.
 
+### Model Validation
+
+Arena validates model names at config load time by discovering available models from each provider. The `copilot-cli` provider runs `copilot --help` and parses the choices list. When an invalid model is detected, the error includes a suggestion:
+
+```
+Invalid model "gemini-3-pro" for provider "copilot-cli". Did you mean "gemini-3-pro-preview"?
+```
+
+Discovered models are cached to `.arena/.model-cache.json` (1-hour TTL) to avoid repeated CLI calls.
+
+Custom providers can opt into model validation:
+
+```json
+{
+  "providers": {
+    "my-agent": {
+      "command": "my-agent-cli",
+      "modelDiscovery": {
+        "command": "my-agent-cli",
+        "args": ["--help"],
+        "parseStrategy": "choices-flag"
+      },
+      "supportedModels": ["model-a", "model-b"]
+    }
+  }
+}
+```
+
+- `modelDiscovery`: Defines a command to run for runtime model discovery. The `choices-flag` parse strategy extracts models from `(choices: "model1", "model2", ...)` output.
+- `supportedModels`: A static list of valid models. When present, takes precedence over runtime discovery.
+
+If a variant agent fails within the first 15 seconds of launch (likely a bad model), the orchestrator automatically retries once with the closest valid model name.
+
 Prompt delivery modes:
 
 - `positional`: append the prompt as the final CLI argument

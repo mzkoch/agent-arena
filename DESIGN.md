@@ -128,7 +128,7 @@ src/
   orchestrator/              PTY lifecycle, idle detection, kill/restart logic
   project/                   ArenaProject abstraction for .arena/ directory layout
   prompt/                    per-worktree instructions and prompts
-  providers/                 built-in providers, overrides, trusted folder helpers
+  providers/                 built-in providers, model discovery/cache, overrides, trusted folder helpers
   tui/                       Ink app, views, adapters, and state reducers
   utils/                     file, format, buffer, logging, and process helpers
 ```
@@ -216,6 +216,43 @@ Evaluation is intentionally lightweight and deterministic:
 - `DESIGN.md` present
 
 The scorer produces a simple recommendation and writes `.arena/<name>/comparison-report.md`.
+
+## Dynamic Model Validation
+
+### Problem
+
+When an invalid model name is used (e.g. `gemini-3-pro` instead of `gemini-3-pro-preview`), the agent silently fails at launch time. Hardcoding model lists is unsustainable because models change frequently.
+
+### Architecture
+
+Model validation is split into three layers:
+
+1. **Provider Model Discovery** (`src/providers/model-discovery.ts`): Runs the provider CLI to discover available models. Each provider declares a `modelDiscovery` config with a command, args, and parse strategy. The `choices-flag` strategy parses `--model <model> (choices: ...)` output. A `supportedModels` static list on `ProviderConfig` serves as a fallback.
+
+2. **Model Cache** (`src/providers/model-cache.ts`): Caches discovered models to `.arena/.model-cache.json` with a 1-hour TTL. Avoids shelling out on every config load.
+
+3. **Validation Integration**: When `loadArenaConfig()` is called with a `gitRoot` option, it validates each variant's model against discovered models. Invalid models produce clear errors with Levenshtein-distance-based suggestions.
+
+### Error Recovery
+
+**Config time (pre-launch):** Invalid models detected during `loadArenaConfig()` produce errors like:
+```
+Invalid model "gemini-3-pro" for provider "copilot-cli". Did you mean "gemini-3-pro-preview"?
+```
+
+**Runtime (post-launch):** The `ArenaOrchestrator` detects early agent failures (within 15 seconds of launch with non-zero exit code). It looks up the closest valid model via the provider registry's discovery and retries once with the corrected model. The effective model is reflected in the agent snapshot so status/monitor show the actual model in use.
+
+### Provider-Specific Behavior
+
+- **copilot-cli**: Uses `copilot --help` with `choices-flag` parse strategy for model discovery.
+- **claude-code**: No model discovery configured — validation is skipped since Claude Code accepts arbitrary model names/aliases.
+- **Custom providers**: Can declare `modelDiscovery` in their config for runtime discovery, or `supportedModels` for a static allowlist.
+
+### Type Extensions
+
+`ProviderConfig` gained two optional fields:
+- `modelDiscovery?: { command, args, parseStrategy }` — how to discover models at runtime
+- `supportedModels?: string[]` — static fallback list
 
 ## Trade-offs
 

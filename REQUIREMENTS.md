@@ -1,88 +1,100 @@
-# Refactor: New CLI Command Structure and Arena Workflow
+# Dynamic Model Validation with Provider Discovery and Error Recovery
 
 ## Overview
 
-Refactor the arena CLI commands to separate project initialization from arena creation, add an accept workflow, add a list command, and make clean safe by default. This is a breaking change to the CLI surface.
+Implement dynamic model name validation for arena configs by querying each provider CLI at runtime, rather than hardcoding model lists. When an invalid model is specified, attempt to recover both at config time (with suggestions) and at launch time (by detecting agent failures due to bad models and retrying with a corrected model).
 
-## Current State
+## Problem
 
-The CLI currently has these commands:
-- `arena init [name]` — overloaded: scaffolds directory AND creates worktrees
-- `arena launch [name] [--headless]` — launches agents
-- `arena monitor [name]` — TUI dashboard
-- `arena status [name]` — JSON status
-- `arena evaluate [name]` — comparison report
-- `arena clean [name]` — removes worktrees (unsafe, no unmerged check)
+Currently, there is no model validation. When an invalid model name is used (e.g. `gemini-3-pro` instead of `gemini-3-pro-preview`), the agent silently fails at launch time. Hardcoding model lists is not a viable solution because models change frequently and availability depends on the user's subscription.
 
-Currently, `REQUIREMENTS.md` and `ARENA-INSTRUCTIONS.md` are written to the worktree root. This means agents can accidentally commit them as part of their implementation.
+## Requirements
 
-## New Command Structure
+### 1. Provider Model Discovery
 
-### 1. `arena init`
-**One-time project setup.** Creates `.arena/` directory at the git root and adds `.arena/` to `.gitignore`. No arguments needed. Should be idempotent — safe to run multiple times.
+Add a model discovery mechanism to the provider system. Each built-in provider should define how to discover available models at runtime:
 
-### 2. `arena create [name]`
-**Create a new named arena.** Scaffolds `.arena/<name>/` with template files:
-- `.arena/<name>/arena.json` — config template with placeholder variants
-- `.arena/<name>/requirements.md` — empty requirements template
+**copilot-cli**: Run `copilot --help` and parse the `--model <model> (choices: ...)` section to extract the available model names.
 
-Options:
-- `--config <path>` — copy an existing config file instead of using the template
-- `--requirements <path>` — copy an existing requirements file instead of using the template
+**claude-code**: Claude Code does not enumerate models in `--help` — it says "provide an alias (e.g. 'sonnet' or 'opus') or a model's full name". For claude-code, skip strict model validation but still attempt discovery if a mechanism becomes available.
 
-Validation:
-- Arena name must be unique (no existing `.arena/<name>/` directory)
-- Arena name validation: lowercase alphanumeric + hyphens, no path traversal, max 64 chars
+**Custom providers**: If a custom provider in arena.json declares a `modelDiscovery` config, use it. Otherwise skip validation for that provider.
 
-### 3. `arena launch [name] [--headless]`
-**Create worktrees and start agents.** This is where worktrees get created — not at `create` time. This allows the user/agent to edit config and requirements freely before committing to worktrees.
+### 2. Model Discovery Implementation
 
-The launch command should:
-1. Validate that `.arena/<name>/arena.json` and `.arena/<name>/requirements.md` exist
-2. Create worktrees for each variant defined in the config
-3. Write `REQUIREMENTS.md` and `ARENA-INSTRUCTIONS.md` into a `.arena/` subdirectory inside each worktree (e.g., `<worktree>/.arena/REQUIREMENTS.md` and `<worktree>/.arena/ARENA-INSTRUCTIONS.md`). This prevents agents from accidentally committing these files as part of their implementation. The `.arena/` directory inside each worktree should also be added to each worktree's `.gitignore`.
-4. Update agent instruction files to reference the new paths (agents should be told to read from `.arena/REQUIREMENTS.md` and `.arena/ARENA-INSTRUCTIONS.md`)
-5. Start agents
+Add to the `ProviderConfig` type:
+```typescript
+modelDiscovery?: {
+  command: string;     // CLI command to run (e.g. "copilot")
+  args: string[];      // arguments (e.g. ["--help"])
+  parseStrategy: string; // how to extract models (e.g. "choices-flag")
+};
+```
 
-### 4. `arena list`
-**List all arenas and their status.** Shows each arena name and current state (created, running, completed, etc.).
+Implement a `discoverModels(provider: ProviderConfig): Promise<string[] | null>` function that:
+- Runs the discovery command
+- Parses the output using the specified strategy
+- Returns the list of available models, or `null` if discovery is not available/fails
+- Has a reasonable timeout (e.g. 5 seconds)
 
-### 5. `arena accept [name] [variant]`
-**Create a clean branch from a winning variant.** This is a lightweight handoff:
-1. Validate the variant exists and has commits ahead of main
-2. Create a new branch (e.g., `accept/<name>/<variant>`) from the variant's branch tip
-3. Print instructions for next steps (verify, PR, merge)
+### 3. Caching
 
-Does NOT do verification, PR creation, or merging — that's the orchestrator agent's job.
+Cache discovered models to `.arena/.model-cache.json` with a structure like:
+```json
+{
+  "copilot-cli": {
+    "models": ["claude-opus-4.6", "gpt-5.4", ...],
+    "discoveredAt": "2026-03-18T01:00:00Z",
+    "ttlMs": 3600000
+  }
+}
+```
+- Cache TTL of 1 hour by default
+- If cache is fresh, use it instead of shelling out
+- If cache is stale or missing, rediscover
 
-### 6. `arena clean [name]`
-**Remove worktrees safely.** Before removing:
-1. Check each worktree branch for unpushed/unmerged commits
-2. If unpushed work exists, warn and refuse unless `--force` is passed
-3. `--force` flag to skip safety checks
-4. `--keep-config` flag behavior remains
+### 4. Validation Integration
 
-### 7. Existing commands (unchanged behavior)
-- `arena monitor [name]` — unchanged
-- `arena status [name]` — unchanged
-- `arena evaluate [name]` — unchanged
+Validate model names during `loadArenaConfig()` (at config parse time):
+1. For each variant, look up its provider
+2. Attempt model discovery for that provider
+3. If discovery succeeds and the model is not in the list, throw a clear error with the valid options
+4. If discovery fails (command not found, timeout, etc.), skip validation gracefully — don't block the user
 
-## Migration from Old Commands
+### 5. Pre-Launch Error Recovery (Config Time)
 
-The old `arena init [name] --config <path> --requirements <path>` behavior should be removed. Users should use `arena create [name] --config <path> --requirements <path>` instead.
+When an invalid model is detected at config validation:
+1. Compute string similarity (e.g. Levenshtein distance or simple substring matching) against the discovered model list
+2. If a close match is found, include it in the error message as a suggestion: `Invalid model "gemini-3-pro" for provider "copilot-cli". Did you mean "gemini-3-pro-preview"?`
+3. Always list all valid models in the error output
 
-`arena init` with no arguments becomes the project-level setup command.
+### 6. Post-Launch Error Recovery (Runtime)
+
+When a variant agent fails shortly after launch due to a bad model name:
+1. Detect the failure — the agent process exits quickly (within the first few seconds) with a non-zero exit code or produces an error message indicating an invalid model
+2. Attempt to identify the closest valid model using the discovered model list
+3. If a close match is found, automatically retry the agent with the corrected model name
+4. Log the recovery attempt clearly: `Variant "gemini-agent" failed with model "gemini-3-pro". Retrying with "gemini-3-pro-preview".`
+5. Update the variant's effective model in the session state so status/monitor reflect the corrected model
+6. If retry also fails, mark the variant as failed with a clear error message
+7. Limit retries to 1 attempt to avoid infinite loops
+
+### 7. Parse Strategy: `choices-flag`
+
+For the `choices-flag` parse strategy (used by copilot-cli):
+- Look for the pattern `--model <model>` followed by `(choices: "model1", "model2", ...)`
+- Extract all quoted strings from the choices list
+- Handle multi-line output (the choices may span multiple lines)
 
 ## Implementation Notes
 
-- The `initializeArena()` function in `src/cli/runtime.ts` should be refactored into separate functions for each command
-- Worktree creation should move to launch time
-- Arena name validation (from opus-robust's bug-15 fix) should be included in `arena create`
-- `REQUIREMENTS.md` and `ARENA-INSTRUCTIONS.md` must be written to `.arena/` inside each worktree, NOT the worktree root
-- Each worktree should have `.arena/` in its `.gitignore` to prevent accidental commits
-- Agent instructions must reference `.arena/REQUIREMENTS.md` and `.arena/ARENA-INSTRUCTIONS.md` as the file paths
-- All existing tests must continue to pass (update as needed for new command structure)
-- Add new tests for: `arena create`, `arena list`, `arena accept`, safe `arena clean`
+- Discovery should be async and handle the CLI not being installed (command not found)
+- The `ProviderRegistry` should expose a `discoverModels(providerName)` method
+- Keep the `supportedModels` field on `ProviderConfig` as a fallback — if populated, use it directly instead of running discovery. This lets custom providers declare a static list if they prefer.
+- Built-in providers should use `modelDiscovery` instead of `supportedModels`
+- The orchestrator's agent spawning logic needs a hook for detecting early model failures and retrying
+- Tests should mock the command execution, not actually shell out to copilot/claude
+- Recovery tests should simulate an agent failing with a model error and verify the retry with corrected model
 
 ## Validation
 
@@ -91,4 +103,3 @@ The old `arena init [name] --config <path> --requirements <path>` behavior shoul
 - `npx tsc --noEmit` must pass
 - `npm run test` must pass
 - `npx vitest run --coverage` — coverage must remain >80% on business-logic code
-- Update README.md, DESIGN.md, and AGENTS.md to reflect the new command structure

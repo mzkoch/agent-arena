@@ -1,5 +1,7 @@
 import type { ArenaConfig, ProviderConfig, VariantConfig } from '../domain/types';
 import { BUILTIN_PROVIDERS } from './builtins';
+import { getCachedModels } from './model-cache';
+import { buildModelValidationError, findClosestModel, type CommandExecutor } from './model-discovery';
 
 export class ProviderRegistry {
   private readonly providers: Map<string, ProviderConfig>;
@@ -27,6 +29,59 @@ export class ProviderRegistry {
 
   public list(): string[] {
     return [...this.providers.keys()].sort();
+  }
+
+  /**
+   * Discover available models for a provider by name.
+   * Uses the model cache to avoid repeated CLI calls.
+   */
+  public async discoverModels(
+    providerName: string,
+    cachePath: string,
+    executor?: CommandExecutor
+  ): Promise<string[] | null> {
+    const provider = this.get(providerName);
+    return getCachedModels(providerName, provider, cachePath, executor);
+  }
+
+  /**
+   * Validate a model name against discovered models for a provider.
+   * Returns null if valid, or an error message if invalid.
+   */
+  public async validateModel(
+    providerName: string,
+    model: string,
+    cachePath: string,
+    executor?: CommandExecutor
+  ): Promise<string | null> {
+    const models = await this.discoverModels(providerName, cachePath, executor);
+    if (!models) {
+      // Discovery not available — skip validation
+      return null;
+    }
+
+    if (models.includes(model)) {
+      return null;
+    }
+
+    return buildModelValidationError(model, providerName, models);
+  }
+
+  /**
+   * Find the closest valid model for a given invalid model name.
+   */
+  public async findClosestModel(
+    providerName: string,
+    invalidModel: string,
+    cachePath: string,
+    executor?: CommandExecutor
+  ): Promise<string | null> {
+    const models = await this.discoverModels(providerName, cachePath, executor);
+    if (!models) {
+      return null;
+    }
+
+    return findClosestModel(invalidModel, models);
   }
 }
 
