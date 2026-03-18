@@ -137,9 +137,10 @@ export const planRemoteCleanup = async (
       continue;
     }
 
-    // Check if accepted (never delete accepted, even with --force)
+    // Accepted variant: delete arena/* branch (preserved via accept branch)
     if (await isAccepted(repository, gitRoot, arenaName, variantName, remoteRefs)) {
-      toSkip.push({ branch, reason: 'accepted' });
+      logger.info('Accepted variant arena branch will be deleted (preserved via accept branch)', { branch });
+      toDelete.push(branch);
       continue;
     }
 
