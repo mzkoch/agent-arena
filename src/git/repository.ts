@@ -341,6 +341,96 @@ export class GitRepositoryManager {
     const prefix = content.length > 0 ? `${separator}\n# Arena\n` : '# Arena\n';
     await writeTextFile(gitignorePath, `${content}${prefix}${entry}\n`);
   }
+
+  public async refExists(repoPath: string, ref: string): Promise<boolean> {
+    const result = await this.runner.run('git', gitArgs(repoPath, ['rev-parse', '--verify', ref]));
+    return result.exitCode === 0;
+  }
+
+  public async resolveBaseRef(repoPath: string): Promise<string> {
+    const candidates = ['main', 'origin/main', 'master', 'origin/master'];
+    for (const candidate of candidates) {
+      if (await this.refExists(repoPath, candidate)) {
+        return candidate;
+      }
+    }
+
+    const originHead = await this.runner.run(
+      'git',
+      gitArgs(repoPath, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'])
+    );
+    if (originHead.exitCode === 0) {
+      const resolved = originHead.stdout.trim().replace(/^refs\/remotes\//u, '');
+      if (resolved.length > 0 && (await this.refExists(repoPath, resolved))) {
+        return resolved;
+      }
+    }
+
+    throw new Error(
+      'Unable to determine an evaluation base ref. Expected one of: main, origin/main, master, origin/master, or origin/HEAD.'
+    );
+  }
+
+  public async listTreeFiles(repoPath: string, ref: string): Promise<Set<string>> {
+    const stdout = await ensureSuccess(
+      this.runner,
+      repoPath,
+      ['ls-tree', '-r', '--name-only', ref],
+      `Failed to list files for ${ref}`
+    );
+    return new Set(
+      stdout
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+    );
+  }
+
+  public async getChangedFiles(repoPath: string, baseRef: string): Promise<string[]> {
+    const stdout = await ensureSuccess(
+      this.runner,
+      repoPath,
+      ['diff', '--name-only', '--find-renames', baseRef, '--'],
+      `Failed to list changed files in ${repoPath}`
+    );
+    return stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  }
+
+  public async getDiffNumStatRaw(repoPath: string, baseRef: string): Promise<string> {
+    return ensureSuccess(
+      this.runner,
+      repoPath,
+      ['diff', '--numstat', '--find-renames', baseRef, '--'],
+      `Failed to collect line stats in ${repoPath}`
+    );
+  }
+
+  public async getUntrackedFiles(repoPath: string): Promise<string[]> {
+    const stdout = await ensureSuccess(
+      this.runner,
+      repoPath,
+      ['ls-files', '--others', '--exclude-standard'],
+      `Failed to list untracked files in ${repoPath}`
+    );
+    return stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  }
+
+  public async getCommitCountSinceRef(repoPath: string, baseRef: string): Promise<number> {
+    const stdout = await ensureSuccess(
+      this.runner,
+      repoPath,
+      ['rev-list', '--count', `${baseRef}..HEAD`],
+      `Failed to count commits since ${baseRef}`
+    );
+    const count = Number.parseInt(stdout.trim(), 10);
+    return Number.isNaN(count) ? 0 : count;
+  }
 }
 
 export const buildVariantWorkspaces = (

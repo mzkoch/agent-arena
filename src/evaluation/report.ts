@@ -1,56 +1,15 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { EvaluationReport, EvaluationVariantMetrics, VariantWorkspace } from '../domain/types';
-import { NodeCommandRunner, type CommandRunner } from '../git/command-runner';
+import { NodeCommandRunner } from '../git/command-runner';
+import { GitRepositoryManager } from '../git/repository';
 import { writeTextFile } from '../utils/files';
+import { createNullLogger } from '../utils/logger';
 
 const isTestFile = (filePath: string): boolean =>
   /\.(test|spec)\.[cm]?[jt]sx?$/.test(filePath) || filePath.includes('__tests__');
 
-const baseRefCandidates = ['main', 'origin/main', 'master', 'origin/master'];
-
 const toPortablePath = (value: string): string => value.split(path.sep).join('/');
-
-const runGit = async (
-  runner: CommandRunner,
-  cwd: string,
-  args: string[],
-  errorMessage: string
-): Promise<string> => {
-  const result = await runner.run('git', args, { cwd });
-  if (result.exitCode !== 0) {
-    throw new Error(`${errorMessage}: ${result.stderr || result.stdout}`.trim());
-  }
-
-  return result.stdout.trim();
-};
-
-const gitRefExists = async (runner: CommandRunner, cwd: string, ref: string): Promise<boolean> => {
-  const result = await runner.run('git', ['rev-parse', '--verify', ref], { cwd });
-  return result.exitCode === 0;
-};
-
-const resolveBaseRef = async (runner: CommandRunner, gitRoot: string): Promise<string> => {
-  for (const candidate of baseRefCandidates) {
-    if (await gitRefExists(runner, gitRoot, candidate)) {
-      return candidate;
-    }
-  }
-
-  const originHead = await runner.run('git', ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], {
-    cwd: gitRoot
-  });
-  if (originHead.exitCode === 0) {
-    const resolved = originHead.stdout.trim().replace(/^refs\/remotes\//u, '');
-    if (resolved.length > 0 && (await gitRefExists(runner, gitRoot, resolved))) {
-      return resolved;
-    }
-  }
-
-  throw new Error(
-    'Unable to determine an evaluation base ref. Expected one of: main, origin/main, master, origin/master, or origin/HEAD.'
-  );
-};
 
 const walkFiles = async (directoryPath: string): Promise<string[]> => {
   const entries = await readdir(directoryPath, { withFileTypes: true });
@@ -70,26 +29,6 @@ const walkFiles = async (directoryPath: string): Promise<string[]> => {
   }
 
   return files;
-};
-
-const listBaseFiles = async (
-  runner: CommandRunner,
-  gitRoot: string,
-  baseRef: string
-): Promise<Set<string>> => {
-  const stdout = await runGit(
-    runner,
-    gitRoot,
-    ['ls-tree', '-r', '--name-only', baseRef],
-    `Failed to list files for ${baseRef}`
-  );
-
-  return new Set(
-    stdout
-      .split(/\r?\n/u)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-  );
 };
 
 const countLines = async (filePath: string): Promise<number> => {
@@ -117,53 +56,21 @@ const parseNumStat = (stdout: string): { addedLineCount: number; deletedLineCoun
     { addedLineCount: 0, deletedLineCount: 0 }
   );
 
-const parsePaths = (stdout: string): string[] =>
-  stdout
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
 const collectVariantMetrics = async (
   workspace: VariantWorkspace,
   baseRef: string,
   baseFiles: Set<string>,
-  runner: CommandRunner
+  git: GitRepositoryManager
 ): Promise<Omit<EvaluationVariantMetrics, 'score' | 'notes'>> => {
   const files = await walkFiles(workspace.worktreePath);
   const relativeFiles = files.map((filePath) => toPortablePath(path.relative(workspace.worktreePath, filePath)));
-  const untrackedPaths = parsePaths(
-    await runGit(
-      runner,
-      workspace.worktreePath,
-      ['ls-files', '--others', '--exclude-standard'],
-      `Failed to list untracked files for ${workspace.variant.name}`
-    )
-  );
-  const diffPaths = parsePaths(
-    await runGit(
-      runner,
-      workspace.worktreePath,
-      ['diff', '--name-only', '--find-renames', baseRef, '--'],
-      `Failed to list changed files for ${workspace.variant.name}`
-    )
-  );
-  const { addedLineCount: trackedAddedLineCount, deletedLineCount: trackedDeletedLineCount } = parseNumStat(
-    await runGit(
-      runner,
-      workspace.worktreePath,
-      ['diff', '--numstat', '--find-renames', baseRef, '--'],
-      `Failed to collect line stats for ${workspace.variant.name}`
-    )
-  );
-  const commitCount = Number.parseInt(
-    await runGit(
-      runner,
-      workspace.worktreePath,
-      ['rev-list', '--count', `${baseRef}..HEAD`],
-      `Failed to count commits for ${workspace.variant.name}`
-    ),
-    10
-  );
+
+  const untrackedPaths = await git.getUntrackedFiles(workspace.worktreePath);
+  const diffPaths = await git.getChangedFiles(workspace.worktreePath, baseRef);
+  const numStatRaw = await git.getDiffNumStatRaw(workspace.worktreePath, baseRef);
+  const { addedLineCount: trackedAddedLineCount, deletedLineCount: trackedDeletedLineCount } =
+    parseNumStat(numStatRaw);
+  const commitCount = await git.getCommitCountSinceRef(workspace.worktreePath, baseRef);
 
   let addedLineCount = trackedAddedLineCount;
   for (const untrackedPath of untrackedPaths) {
@@ -245,13 +152,14 @@ export const scoreVariant = (metrics: Omit<EvaluationVariantMetrics, 'score' | '
 export const evaluateWorkspaces = async (
   gitRoot: string,
   workspaces: VariantWorkspace[],
-  runner: CommandRunner = new NodeCommandRunner()
+  git?: GitRepositoryManager
 ): Promise<EvaluationReport> => {
-  const baseRef = await resolveBaseRef(runner, gitRoot);
-  const baseFiles = await listBaseFiles(runner, gitRoot, baseRef);
+  const manager = git ?? new GitRepositoryManager(new NodeCommandRunner(), createNullLogger());
+  const baseRef = await manager.resolveBaseRef(gitRoot);
+  const baseFiles = await manager.listTreeFiles(gitRoot, baseRef);
   const variants = await Promise.all(
     workspaces.map(async (workspace) => {
-      const metrics = await collectVariantMetrics(workspace, baseRef, baseFiles, runner);
+      const metrics = await collectVariantMetrics(workspace, baseRef, baseFiles, manager);
       return scoreVariant(metrics);
     })
   );
