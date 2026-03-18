@@ -404,10 +404,7 @@ The test suite enforces a minimum 80% coverage threshold for the business-logic 
 
 ## Contributing
 
-1. Fork the repository.
-2. Create a feature branch.
-3. Run `npm run validate`.
-4. Open a pull request with a focused change set.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, release procedures, and submission guidelines.
 
 ## License
 
