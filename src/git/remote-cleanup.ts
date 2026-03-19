@@ -40,26 +40,28 @@ const extractVariantName = (branch: string, arenaName: string): string => {
   return branch;
 };
 
-const isAccepted = async (
-  repository: GitRepositoryManager,
-  gitRoot: string,
+const isAcceptedRemotely = (
   arenaName: string,
   variantName: string,
   remoteRefs: Map<string, string>
+): boolean => {
+  const acceptBranch = `accept/${arenaName}/${variantName}`;
+  return remoteRefs.has(`refs/heads/${acceptBranch}`) || remoteRefs.has(`refs/tags/${acceptBranch}`);
+};
+
+const isAcceptedLocally = async (
+  repository: GitRepositoryManager,
+  gitRoot: string,
+  arenaName: string,
+  variantName: string
 ): Promise<boolean> => {
   const acceptBranch = `accept/${arenaName}/${variantName}`;
-
-  // Check remote branch
-  if (remoteRefs.has(`refs/heads/${acceptBranch}`)) return true;
-  // Check remote tag
-  if (remoteRefs.has(`refs/tags/${acceptBranch}`)) return true;
-  // Check local branch
   if (await repository.refExists(gitRoot, `refs/heads/${acceptBranch}`)) return true;
-  // Check local tag
   if (await repository.refExists(gitRoot, `refs/tags/${acceptBranch}`)) return true;
-
   return false;
 };
+
+
 
 /**
  * Plan phase: classify branches into delete/skip lists without performing any mutations.
@@ -137,13 +139,6 @@ export const planRemoteCleanup = async (
       continue;
     }
 
-    // Accepted variant: delete arena/* branch (preserved via accept branch)
-    if (await isAccepted(repository, gitRoot, arenaName, variantName, remoteRefs)) {
-      logger.info('Accepted variant arena branch will be deleted (preserved via accept branch)', { branch });
-      toDelete.push(branch);
-      continue;
-    }
-
     // Check for open PRs (skip in non-force mode)
     if (!force) {
       const hasPR = await repository.hasOpenPullRequest(
@@ -156,6 +151,19 @@ export const planRemoteCleanup = async (
         toSkip.push({ branch, reason: 'has open pull request' });
         continue;
       }
+    }
+
+    // Accepted variant: delete arena/* branch only when accept ref exists on remote
+    if (isAcceptedRemotely(arenaName, variantName, remoteRefs)) {
+      logger.info('Accepted variant arena branch will be deleted (preserved via accept branch)', { branch });
+      toDelete.push(branch);
+      continue;
+    }
+
+    // Accepted locally only: skip deletion — accept branch not yet pushed to remote
+    if (await isAcceptedLocally(repository, gitRoot, arenaName, variantName)) {
+      toSkip.push({ branch, reason: 'accepted (accept branch not yet on remote)' });
+      continue;
     }
 
     toDelete.push(branch);

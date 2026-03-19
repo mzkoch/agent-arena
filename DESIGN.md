@@ -280,7 +280,7 @@ Remote branch cleanup follows a three-layer architecture:
 ### CLI Flags
 
 - `--keep-remote` — Opt out of remote branch deletion (preserves pre-feature behavior).
-- `--force` — Skips unmerged-work safety checks AND deletes remote branches with open PRs (still never deletes accepted branches).
+- `--force` — Skips unmerged-work safety checks AND deletes remote branches with open PRs.
 
 ## Trade-offs
 

@@ -91,7 +91,7 @@ arena clean --keep-config  # keep arena.json and requirements.md
 arena clean --keep-remote  # skip remote branch deletion
 ```
 
-By default, `arena clean` also deletes remote branches for non-accepted variants. Branches with open pull requests are preserved unless `--force` is used. Accepted variant branches (created via `arena accept`) are never deleted remotely. If the remote is unreachable, remote cleanup is skipped gracefully.
+By default, `arena clean` also deletes remote branches for non-accepted variants. Branches with open pull requests are preserved unless `--force` is used. Accepted variant `arena/*` branches are deleted when a corresponding `accept/*` branch exists on the remote (the accept branch is the canonical ref). If the accept branch has not been pushed yet, the arena branch is preserved. If the remote is unreachable, remote cleanup is skipped gracefully.
 
 ### Multiple Arenas
 
