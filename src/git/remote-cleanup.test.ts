@@ -75,7 +75,7 @@ describe('planRemoteCleanup', () => {
     expect(plan.toSkip[0]?.reason).toMatch(/remote.*unreachable/i);
   });
 
-  it('skips accepted branches (remote branch ref)', async () => {
+  it('deletes accepted branches (remote branch ref)', async () => {
     const remoteRefs = new Map([
       ['refs/heads/arena/test/variant-a', 'aaa111'],
       ['refs/heads/arena/test/variant-b', 'bbb222'],
@@ -95,13 +95,14 @@ describe('planRemoteCleanup', () => {
       logger: silentLogger
     });
 
-    expect(plan.toSkip).toContainEqual(
-      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/accepted/i) })
+    expect(plan.toDelete).toContain('arena/test/variant-a');
+    expect(plan.toDelete).toContain('arena/test/variant-b');
+    expect(plan.toSkip).not.toContainEqual(
+      expect.objectContaining({ branch: 'arena/test/variant-a' })
     );
-    expect(plan.toDelete).toContainEqual('arena/test/variant-b');
   });
 
-  it('skips accepted branches (remote tag ref)', async () => {
+  it('deletes accepted branches (remote tag ref)', async () => {
     const remoteRefs = new Map([
       ['refs/heads/arena/test/variant-a', 'aaa111'],
       ['refs/tags/accept/test/variant-a', 'aaa111']
@@ -120,12 +121,13 @@ describe('planRemoteCleanup', () => {
       logger: silentLogger
     });
 
-    expect(plan.toSkip).toContainEqual(
-      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/accepted/i) })
+    expect(plan.toDelete).toContain('arena/test/variant-a');
+    expect(plan.toSkip).not.toContainEqual(
+      expect.objectContaining({ branch: 'arena/test/variant-a' })
     );
   });
 
-  it('skips accepted branches (local branch ref)', async () => {
+  it('skips accepted branches when accept ref is local-only (branch)', async () => {
     const remoteRefs = new Map([
       ['refs/heads/arena/test/variant-a', 'aaa111']
     ]);
@@ -145,12 +147,13 @@ describe('planRemoteCleanup', () => {
       logger: silentLogger
     });
 
+    expect(plan.toDelete).not.toContain('arena/test/variant-a');
     expect(plan.toSkip).toContainEqual(
-      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/accepted/i) })
+      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/not yet on remote/) })
     );
   });
 
-  it('skips accepted branches (local tag ref)', async () => {
+  it('skips accepted branches when accept tag is local-only', async () => {
     const remoteRefs = new Map([
       ['refs/heads/arena/test/variant-a', 'aaa111']
     ]);
@@ -170,8 +173,9 @@ describe('planRemoteCleanup', () => {
       logger: silentLogger
     });
 
+    expect(plan.toDelete).not.toContain('arena/test/variant-a');
     expect(plan.toSkip).toContainEqual(
-      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/accepted/i) })
+      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/not yet on remote/) })
     );
   });
 
@@ -200,7 +204,7 @@ describe('planRemoteCleanup', () => {
     expect(plan.toDelete).toHaveLength(0);
   });
 
-  it('force mode deletes branches with open PRs but still skips accepted', async () => {
+  it('force mode deletes branches with open PRs and also deletes accepted', async () => {
     const remoteRefs = new Map([
       ['refs/heads/arena/test/variant-a', 'aaa111'],
       ['refs/heads/arena/test/variant-b', 'bbb222'],
@@ -223,12 +227,41 @@ describe('planRemoteCleanup', () => {
       logger: silentLogger
     });
 
-    // accepted variant-a should still be skipped
-    expect(plan.toSkip).toContainEqual(
-      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/accepted/i) })
-    );
+    // accepted variant-a should be deleted (preserved via accept branch)
+    expect(plan.toDelete).toContain('arena/test/variant-a');
     // variant-b has open PR but force mode → should be deleted
     expect(plan.toDelete).toContain('arena/test/variant-b');
+    expect(plan.toSkip).toHaveLength(0);
+  });
+
+
+
+  it('preserves accepted branch with open PR in non-force mode', async () => {
+    const remoteRefs = new Map([
+      ['refs/heads/arena/test/variant-a', 'aaa111'],
+      ['refs/heads/accept/test/variant-a', 'aaa111'],
+      ['refs/pull/1/head', 'aaa111']
+    ]);
+
+    const repo = createMockRepo({
+      listRemoteRefs: vi.fn().mockResolvedValue(remoteRefs),
+      hasOpenPullRequest: vi.fn().mockResolvedValue(true),
+      refExists: vi.fn().mockResolvedValue(false)
+    });
+
+    const plan = await planRemoteCleanup({
+      repository: repo,
+      gitRoot: '/repo',
+      arenaName: 'test',
+      branches: ['arena/test/variant-a'],
+      logger: silentLogger
+    });
+
+    // Open PR takes priority — branch should be skipped even though accepted
+    expect(plan.toSkip).toContainEqual(
+      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/open pull request/) })
+    );
+    expect(plan.toDelete).not.toContain('arena/test/variant-a');
   });
 
   it('skips branches not present on remote', async () => {

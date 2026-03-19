@@ -79,7 +79,7 @@ const remoteHasBranch = async (remoteDir: string, branch: string): Promise<boole
 // ── Integration tests ──
 
 describe('Remote branch cleanup integration', () => {
-  it('deletes non-accepted remote branches, keeps accepted ones', async () => {
+  it('deletes accepted variant arena branch, preserves accept branch', async () => {
     const { gitRoot, remoteDir } = await createRemoteBackedRepo();
     const manager = new GitRepositoryManager(new NodeCommandRunner(), silentLogger);
 
@@ -91,9 +91,10 @@ describe('Remote branch cleanup integration', () => {
     await execFileAsync('git', ['-C', gitRoot, 'branch', 'accept/test/variant-a', 'arena/test/variant-a']);
     await execFileAsync('git', ['-C', gitRoot, 'push', 'origin', 'accept/test/variant-a']);
 
-    // Verify both branches exist on remote
+    // Verify both arena branches and the accept branch exist on remote
     expect(await remoteHasBranch(remoteDir, 'arena/test/variant-a')).toBe(true);
     expect(await remoteHasBranch(remoteDir, 'arena/test/variant-b')).toBe(true);
+    expect(await remoteHasBranch(remoteDir, 'accept/test/variant-a')).toBe(true);
 
     // Plan and execute cleanup
     const plan = await planRemoteCleanup({
@@ -104,10 +105,12 @@ describe('Remote branch cleanup integration', () => {
       logger: silentLogger
     });
 
-    expect(plan.toSkip).toContainEqual(
-      expect.objectContaining({ branch: 'arena/test/variant-a', reason: 'accepted' })
-    );
+    // Accepted variant's arena branch should be scheduled for deletion
+    expect(plan.toDelete).toContain('arena/test/variant-a');
     expect(plan.toDelete).toContain('arena/test/variant-b');
+    expect(plan.toSkip).not.toContainEqual(
+      expect.objectContaining({ branch: 'arena/test/variant-a' })
+    );
 
     const result = await executeRemoteCleanup({
       repository: manager,
@@ -116,12 +119,14 @@ describe('Remote branch cleanup integration', () => {
       logger: silentLogger
     });
 
+    expect(result.deleted).toContain('arena/test/variant-a');
     expect(result.deleted).toContain('arena/test/variant-b');
     expect(result.errors).toHaveLength(0);
 
-    // Verify remote state
-    expect(await remoteHasBranch(remoteDir, 'arena/test/variant-a')).toBe(true);
+    // Verify remote state: arena branches deleted, accept branch preserved
+    expect(await remoteHasBranch(remoteDir, 'arena/test/variant-a')).toBe(false);
     expect(await remoteHasBranch(remoteDir, 'arena/test/variant-b')).toBe(false);
+    expect(await remoteHasBranch(remoteDir, 'accept/test/variant-a')).toBe(true);
   }, 30_000);
 
   it('detects open PRs via OID fallback', async () => {
@@ -241,15 +246,17 @@ describe('Remote branch cleanup integration', () => {
 
   it('formatRemoteCleanupResult produces readable output for integration scenario', () => {
     const result = {
-      deleted: ['arena/test/variant-b'],
-      skipped: [{ branch: 'arena/test/variant-a', reason: 'accepted' }],
+      deleted: ['arena/test/variant-a', 'arena/test/variant-b'],
+      skipped: [{ branch: 'arena/test/variant-c', reason: 'has open pull request' }],
       errors: []
     };
 
     const output = formatRemoteCleanupResult(result);
     expect(output).toContain('deleted');
+    expect(output).toContain('arena/test/variant-a');
     expect(output).toContain('arena/test/variant-b');
     expect(output).toContain('skipped');
-    expect(output).toContain('accepted');
+    expect(output).toContain('arena/test/variant-c');
+    expect(output).toContain('has open pull request');
   });
 });
