@@ -1,10 +1,10 @@
-import { access, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   acceptVariant,
   checkUnmergedWork,
@@ -18,6 +18,7 @@ import {
   setupWorkspacesForLaunch,
   validateArenaName
 } from './runtime';
+import * as loadModule from '../config/load';
 import { saveModelCache } from '../providers/model-cache';
 
 const execFileAsync = promisify(execFile);
@@ -412,6 +413,42 @@ describe('model validation at CLI call sites (issue #40 regression)', () => {
     } finally {
       process.chdir(origCwd);
     }
+  });
+
+  it('passes gitRoot to loadArenaConfig at every call site', async () => {
+    const { gitRoot } = await setupArenaWithModel('gpt-5');
+    const loadArenaConfigSpy = vi.spyOn(loadModule, 'loadArenaConfig');
+
+    const origCwd = process.cwd();
+    process.chdir(gitRoot);
+    try {
+      await loadRuntimeContext('test-arena', logger);
+    } finally {
+      process.chdir(origCwd);
+    }
+    await listArenas(gitRoot, logger);
+    await expect(
+      acceptVariant(gitRoot, 'test-arena', 'missing-variant', logger)
+    ).rejects.toThrow(/not found/i);
+
+    expect(loadArenaConfigSpy).toHaveBeenCalledTimes(3);
+
+    const [runtimeCall, listCall, acceptCall] = loadArenaConfigSpy.mock.calls;
+    const canonicalGitRoot = await realpath(gitRoot);
+
+    const runtimeOptions = runtimeCall?.[2] as { gitRoot: string } | undefined;
+    expect(runtimeOptions).toBeDefined();
+    expect(await realpath(runtimeOptions!.gitRoot)).toBe(canonicalGitRoot);
+
+    const listOptions = listCall?.[2] as { gitRoot: string; skipModelValidation?: boolean } | undefined;
+    expect(listOptions).toMatchObject({ skipModelValidation: true });
+    expect(await realpath(listOptions!.gitRoot)).toBe(canonicalGitRoot);
+
+    const acceptOptions = acceptCall?.[2] as { gitRoot: string } | undefined;
+    expect(acceptOptions).toBeDefined();
+    expect(await realpath(acceptOptions!.gitRoot)).toBe(canonicalGitRoot);
+
+    loadArenaConfigSpy.mockRestore();
   });
 });
 
