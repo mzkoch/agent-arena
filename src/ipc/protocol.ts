@@ -1,14 +1,21 @@
 import type { AgentSnapshot, AgentStatus, ArenaSnapshot } from '../domain/types';
+import type { TerminalDelta, TerminalSnapshot } from '../terminal/types';
 
 export interface SnapshotMessage {
   type: 'snapshot';
   snapshot: ArenaSnapshot;
 }
 
-export interface AgentOutputMessage {
-  type: 'agent-output';
+export interface AgentTerminalMessage {
+  type: 'agent-terminal';
   agent: string;
-  chunk: string;
+  delta: TerminalDelta;
+}
+
+export interface AgentTerminalSnapshotMessage {
+  type: 'agent-terminal-snapshot';
+  agent: string;
+  snapshot: TerminalSnapshot;
 }
 
 export interface AgentStateMessage {
@@ -25,7 +32,8 @@ export interface ServerErrorMessage {
 
 export type ServerToClientMessage =
   | SnapshotMessage
-  | AgentOutputMessage
+  | AgentTerminalMessage
+  | AgentTerminalSnapshotMessage
   | AgentStateMessage
   | ServerErrorMessage;
 
@@ -45,7 +53,29 @@ export interface RestartMessage {
   agent: string;
 }
 
-export type ClientToServerMessage = InputMessage | KillMessage | RestartMessage;
+export interface ConnectMessage {
+  type: 'connect';
+  clientType: 'controller' | 'monitor';
+}
+
+export interface DisconnectMessage {
+  type: 'disconnect';
+}
+
+export interface RequestSnapshotMessage {
+  type: 'request-snapshot';
+  agent: string;
+}
+
+export type ClientToServerMessage =
+  | InputMessage
+  | KillMessage
+  | RestartMessage
+  | ConnectMessage
+  | DisconnectMessage
+  | RequestSnapshotMessage;
+
+export const MUTATING_MESSAGE_TYPES = new Set<string>(['input', 'kill', 'restart']);
 
 export const serializeNdjsonMessage = (
   message: ServerToClientMessage | ClientToServerMessage

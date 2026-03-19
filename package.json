@@ -50,6 +50,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
     "commander": "^14.0.1",
     "ink": "^5.2.1",
     "node-pty": "^1.1.0",

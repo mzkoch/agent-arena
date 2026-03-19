@@ -1,0 +1,26 @@
+{
+  "arenaName": "vt-monitor-v2",
+  "variants": [
+    {
+      "name": "opus",
+      "provider": "copilot-cli",
+      "model": "claude-opus-4.6",
+      "techStack": "TypeScript with Node.js",
+      "designPhilosophy": "Simplicity, elegance, and accuracy. Favor the simplest correct solution. Write thorough tests that cover all scenarios and edge cases — happy paths, error paths, reconnection, version gaps, concurrent writes, and boundary conditions. Every component should be easy to understand, hard to misuse, and fully validated before moving on."
+    },
+    {
+      "name": "gpt",
+      "provider": "copilot-cli",
+      "model": "gpt-5.4",
+      "techStack": "TypeScript with Node.js",
+      "designPhilosophy": "Simplicity, elegance, and accuracy. Favor the simplest correct solution. Write thorough tests that cover all scenarios and edge cases — happy paths, error paths, reconnection, version gaps, concurrent writes, and boundary conditions. Every component should be easy to understand, hard to misuse, and fully validated before moving on."
+    },
+    {
+      "name": "gemini",
+      "provider": "copilot-cli",
+      "model": "gemini-3-pro-preview",
+      "techStack": "TypeScript with Node.js",
+      "designPhilosophy": "Simplicity, elegance, and accuracy. Favor the simplest correct solution. Write thorough tests that cover all scenarios and edge cases — happy paths, error paths, reconnection, version gaps, concurrent writes, and boundary conditions. Every component should be easy to understand, hard to misuse, and fully validated before moving on."
+    }
+  ]
+}
