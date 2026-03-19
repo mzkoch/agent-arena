@@ -247,7 +247,7 @@ describe('Remote branch cleanup integration', () => {
   it('formatRemoteCleanupResult produces readable output for integration scenario', () => {
     const result = {
       deleted: ['arena/test/variant-a', 'arena/test/variant-b'],
-      skipped: [],
+      skipped: [{ branch: 'arena/test/variant-c', reason: 'has open pull request' }],
       errors: []
     };
 
@@ -255,5 +255,8 @@ describe('Remote branch cleanup integration', () => {
     expect(output).toContain('deleted');
     expect(output).toContain('arena/test/variant-a');
     expect(output).toContain('arena/test/variant-b');
+    expect(output).toContain('skipped');
+    expect(output).toContain('arena/test/variant-c');
+    expect(output).toContain('has open pull request');
   });
 });
