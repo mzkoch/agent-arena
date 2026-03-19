@@ -257,4 +257,202 @@ describe('ArenaIpcServer + ArenaIpcClient', () => {
     client.close();
     await server.close();
   });
+
+  it('handles malformed JSON from client gracefully', async () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const server = new ArenaIpcServer({
+      logger,
+      snapshotProvider: () => ({
+        type: 'snapshot',
+        snapshot: {
+          gitRoot: '/tmp/project',
+          startedAt: new Date(0).toISOString(),
+          headless: true,
+          agents: [],
+        },
+      }),
+      onMessage: vi.fn(),
+    });
+
+    const port = await server.listen();
+
+    // Connect a raw socket and send malformed data
+    const net = await import('node:net');
+    const rawSocket = new net.Socket();
+    const errorMessages: string[] = [];
+
+    await new Promise<void>((resolve) => {
+      rawSocket.connect(port, '127.0.0.1', () => {
+        rawSocket.setEncoding('utf8');
+        rawSocket.on('data', (chunk: string) => {
+          for (const line of chunk.split('\n').filter(Boolean)) {
+            const msg = JSON.parse(line) as ServerToClientMessage;
+            if (msg.type === 'error') {
+              errorMessages.push(msg.message);
+            }
+          }
+        });
+        // Send invalid JSON
+        rawSocket.write('not valid json\n');
+        setTimeout(resolve, 100);
+      });
+    });
+
+    expect(errorMessages.length).toBe(1);
+    expect(errorMessages[0]).toMatch(/Bad request/);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Malformed IPC message from client',
+      expect.objectContaining({ error: expect.any(String) as string })
+    );
+
+    rawSocket.destroy();
+    await server.close();
+  });
+
+  it('handles disconnect message from client', async () => {
+    const server = new ArenaIpcServer({
+      logger: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      snapshotProvider: () => ({
+        type: 'snapshot',
+        snapshot: {
+          gitRoot: '/tmp/project',
+          startedAt: new Date(0).toISOString(),
+          headless: true,
+          agents: [],
+        },
+      }),
+      onMessage: vi.fn(),
+    });
+
+    const port = await server.listen();
+    const client = new ArenaIpcClient();
+    await client.connect(port, '127.0.0.1', 'monitor');
+
+    const closePromise = new Promise<void>((resolve) => {
+      client.on('close', resolve);
+    });
+
+    // Send disconnect — server should destroy the socket
+    client.disconnect();
+    await closePromise;
+
+    await server.close();
+  });
+
+  it('responds to request-snapshot with agent terminal snapshot', async () => {
+    const terminalSnapshot = {
+      cols: 120,
+      rows: 40,
+      scrollback: 100,
+      lines: ['hello world'],
+      cursor: { row: 0, col: 11, visible: true },
+      version: 5,
+    };
+
+    const server = new ArenaIpcServer({
+      logger: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      snapshotProvider: () => ({
+        type: 'snapshot',
+        snapshot: {
+          gitRoot: '/tmp/project',
+          startedAt: new Date(0).toISOString(),
+          headless: true,
+          agents: [],
+        },
+      }),
+      onMessage: vi.fn(),
+      agentTerminalSnapshotProvider: (agent: string) => {
+        if (agent === 'alpha') {
+          return terminalSnapshot;
+        }
+        return undefined;
+      },
+    });
+
+    const port = await server.listen();
+    const client = new ArenaIpcClient();
+    const messages: ServerToClientMessage[] = [];
+    client.on('message', (msg) => messages.push(msg));
+
+    await client.connect(port, '127.0.0.1', 'controller');
+
+    // Request snapshot for known agent
+    client.send({ type: 'request-snapshot', agent: 'alpha' });
+
+    await vi.waitFor(() => {
+      expect(messages.some((m) => m.type === 'agent-terminal-snapshot')).toBe(true);
+    });
+
+    const snapshotMsg = messages.find((m) => m.type === 'agent-terminal-snapshot');
+    expect(snapshotMsg).toEqual({
+      type: 'agent-terminal-snapshot',
+      agent: 'alpha',
+      snapshot: terminalSnapshot,
+    });
+
+    // Request snapshot for unknown agent — no response
+    const messageCountBefore = messages.length;
+    client.send({ type: 'request-snapshot', agent: 'unknown' });
+
+    // Give time for potential response
+    await new Promise((r) => setTimeout(r, 50));
+    expect(messages.length).toBe(messageCountBefore);
+
+    client.close();
+    await server.close();
+  });
+
+  it('request-snapshot is a no-op when provider is not configured', async () => {
+    const server = new ArenaIpcServer({
+      logger: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      snapshotProvider: () => ({
+        type: 'snapshot',
+        snapshot: {
+          gitRoot: '/tmp/project',
+          startedAt: new Date(0).toISOString(),
+          headless: true,
+          agents: [],
+        },
+      }),
+      onMessage: vi.fn(),
+      // No agentTerminalSnapshotProvider
+    });
+
+    const port = await server.listen();
+    const client = new ArenaIpcClient();
+    const messages: ServerToClientMessage[] = [];
+    client.on('message', (msg) => messages.push(msg));
+
+    await client.connect(port, '127.0.0.1', 'controller');
+
+    const messageCountBefore = messages.length;
+    client.send({ type: 'request-snapshot', agent: 'alpha' });
+
+    await new Promise((r) => setTimeout(r, 50));
+    // No additional messages should have been received
+    expect(messages.length).toBe(messageCountBefore);
+
+    client.close();
+    await server.close();
+  });
 });
