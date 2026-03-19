@@ -34,7 +34,7 @@ export const TerminalView = ({
   return (
     <>
       {visibleLines.map((line, index) => (
-        <Text key={`${index}-${line}`}>{line}</Text>
+        <Text key={index}>{line}</Text>
       ))}
     </>
   );

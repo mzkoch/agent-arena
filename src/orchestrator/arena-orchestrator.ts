@@ -301,12 +301,14 @@ export class ArenaOrchestrator extends EventEmitter<{
     const provider = this.registry.get(agent.workspace.variant.provider);
     const plainChunk = stripAnsi(chunk);
 
-    // Write to VT and chain delta emission
-    agent.pendingWrite = agent.vterm.write(chunk).then(() => {
+    // Capture vterm reference so the delta always matches the terminal that processed the write
+    const vterm = agent.vterm;
+    agent.pendingWrite = vterm.write(chunk).then(() => {
+      if (agent.vterm !== vterm) return;
       this.emit('message', {
         type: 'agent-terminal',
         agent: agentName,
-        delta: agent.vterm.getDelta()
+        delta: vterm.getDelta()
       });
     });
 
@@ -498,11 +500,16 @@ export class ArenaOrchestrator extends EventEmitter<{
   }
 
   public resizeAll(cols: number, rows: number): void {
-    for (const [, agent] of this.agents) {
+    for (const [agentName, agent] of this.agents) {
       agent.vterm.resize(cols, rows);
       if (agent.process) {
         agent.process.resize(cols, rows);
       }
+      this.emit('message', {
+        type: 'agent-terminal-snapshot',
+        agent: agentName,
+        snapshot: agent.vterm.getSnapshot()
+      });
     }
   }
 

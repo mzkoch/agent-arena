@@ -73,6 +73,15 @@ export class ArenaIpcServer {
         continue;
       }
 
+      // Require handshake before any other messages
+      if (!this.readySockets.has(socket)) {
+        socket.write(serializeNdjsonMessage({
+          type: 'error',
+          message: 'Client must send a "connect" message before any other messages.',
+        }));
+        continue;
+      }
+
       if (message.type === 'request-snapshot') {
         if (this.options.agentTerminalSnapshotProvider) {
           const terminalSnapshot = this.options.agentTerminalSnapshotProvider(message.agent);

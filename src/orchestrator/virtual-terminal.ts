@@ -9,6 +9,8 @@ export class VirtualTerminal {
   private readonly dirtyRows = new Set<number>();
   private readonly lastEmitted = new Map<number, string>();
   private readonly plainTextChunks: string[] = [];
+  private plainTextLength = 0;
+  private static readonly MAX_PLAIN_TEXT_LENGTH = 1_000_000;
 
   private writeQueue: Promise<void> = Promise.resolve();
   private version = 0;
@@ -22,7 +24,15 @@ export class VirtualTerminal {
   }
 
   public write(data: string): Promise<void> {
-    this.plainTextChunks.push(stripAnsi(data));
+    const plain = stripAnsi(data);
+    this.plainTextChunks.push(plain);
+    this.plainTextLength += plain.length;
+
+    // Bound the accumulator to prevent unbounded memory growth
+    while (this.plainTextLength > VirtualTerminal.MAX_PLAIN_TEXT_LENGTH && this.plainTextChunks.length > 1) {
+      const removed = this.plainTextChunks.shift()!;
+      this.plainTextLength -= removed.length;
+    }
 
     this.writeQueue = this.writeQueue.then(
       () =>

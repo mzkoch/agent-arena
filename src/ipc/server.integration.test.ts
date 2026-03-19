@@ -455,4 +455,57 @@ describe('ArenaIpcServer + ArenaIpcClient', () => {
     client.close();
     await server.close();
   });
+
+  it('rejects messages from clients that have not sent connect handshake', async () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const onMessage = vi.fn();
+    const server = new ArenaIpcServer({
+      logger,
+      snapshotProvider: () => ({
+        type: 'snapshot',
+        snapshot: {
+          gitRoot: '/tmp/project',
+          startedAt: new Date(0).toISOString(),
+          headless: true,
+          agents: [],
+        },
+      }),
+      onMessage,
+    });
+
+    const port = await server.listen();
+
+    const net = await import('node:net');
+    const rawSocket = new net.Socket();
+    const errorMessages: string[] = [];
+
+    await new Promise<void>((resolve) => {
+      rawSocket.connect(port, '127.0.0.1', () => {
+        rawSocket.setEncoding('utf8');
+        rawSocket.on('data', (chunk: string) => {
+          for (const line of chunk.split('\n').filter(Boolean)) {
+            const msg = JSON.parse(line) as ServerToClientMessage;
+            if (msg.type === 'error') {
+              errorMessages.push(msg.message);
+            }
+          }
+        });
+        // Send an input message without connecting first
+        rawSocket.write(JSON.stringify({ type: 'input', agent: 'a', data: 'x' }) + '\n');
+        setTimeout(resolve, 100);
+      });
+    });
+
+    expect(errorMessages.length).toBe(1);
+    expect(errorMessages[0]).toMatch(/connect/i);
+    expect(onMessage).not.toHaveBeenCalled();
+
+    rawSocket.destroy();
+    await server.close();
+  });
 });

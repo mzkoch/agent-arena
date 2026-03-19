@@ -33,7 +33,7 @@ export const DetailView = ({
   if (capabilities.canSendInput) footerParts.push('i interactive');
   if (capabilities.canKill) footerParts.push('k kill');
   if (capabilities.canRestart) footerParts.push('r restart');
-  footerParts.push('q quit');
+  footerParts.push(capabilities.mode === 'monitor' ? 'q exit monitor' : 'q quit');
   const footer = footerParts.join(' | ');
 
   return (

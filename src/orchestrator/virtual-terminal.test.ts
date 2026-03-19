@@ -187,4 +187,22 @@ describe('VirtualTerminal', () => {
 
     vt.dispose();
   });
+
+  it('bounds plainTextChunks to prevent unbounded memory growth', async () => {
+    const vt = new VirtualTerminal(80, 24);
+
+    // Write enough data to exceed the 1MB limit
+    const chunk = 'x'.repeat(200_000);
+    for (let i = 0; i < 10; i++) {
+      await vt.write(chunk);
+    }
+
+    const plainText = vt.getPlainText();
+    // Should be bounded — not the full 2MB
+    expect(plainText.length).toBeLessThanOrEqual(1_200_000);
+    // Should still contain recent data
+    expect(plainText.length).toBeGreaterThan(0);
+
+    vt.dispose();
+  });
 });
