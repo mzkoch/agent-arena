@@ -9,7 +9,11 @@ export class ArenaIpcClient extends EventEmitter<{
 }> {
   private readonly socket = new net.Socket();
 
-  public async connect(port: number, host = '127.0.0.1'): Promise<SnapshotMessage> {
+  public async connect(
+    port: number,
+    host = '127.0.0.1',
+    clientType: 'controller' | 'monitor' = 'controller'
+  ): Promise<SnapshotMessage> {
     return new Promise((resolve, reject) => {
       const parser = new NdjsonParser<ServerToClientMessage>();
       let snapshotResolved = false;
@@ -17,6 +21,9 @@ export class ArenaIpcClient extends EventEmitter<{
       this.socket.setEncoding('utf8');
       this.socket.once('error', reject);
       this.socket.connect(port, host, () => {
+        // Send connect handshake immediately
+        this.send({ type: 'connect', clientType });
+
         this.socket.on('data', (chunk: string) => {
           for (const message of parser.push(chunk)) {
             this.emit('message', message);

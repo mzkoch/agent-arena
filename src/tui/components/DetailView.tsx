@@ -1,20 +1,11 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { AgentSnapshot } from '../../domain/types';
+import type { ArenaControllerCapabilities } from '../controller';
 import { formatElapsed } from '../../utils/format';
 import { AgentTabs } from './AgentTabs';
 import { StatusIndicator } from './StatusIndicator';
-
-const getVisibleLines = (
-  outputLines: string[],
-  scrollOffset: number,
-  maxLines: number
-): string[] => {
-  const safeOffset = Math.max(0, scrollOffset);
-  const end = outputLines.length - safeOffset;
-  const start = Math.max(0, end - maxLines);
-  return outputLines.slice(start, Math.max(start, end));
-};
+import { TerminalView } from './TerminalView';
 
 interface DetailViewProps {
   agents: AgentSnapshot[];
@@ -22,6 +13,7 @@ interface DetailViewProps {
   scrollOffset: number;
   interactive: boolean;
   now: number;
+  capabilities: ArenaControllerCapabilities;
 }
 
 export const DetailView = ({
@@ -29,13 +21,20 @@ export const DetailView = ({
   selectedIndex,
   scrollOffset,
   interactive,
-  now
+  now,
+  capabilities
 }: DetailViewProps): React.JSX.Element => {
   const agent = agents[selectedIndex];
-  const outputLines = agent ? getVisibleLines(agent.outputLines, scrollOffset, 24) : [];
   const elapsed = agent?.startedAt && !agent?.completedAt
     ? formatElapsed(now - new Date(agent.startedAt).getTime())
     : formatElapsed(agent?.elapsedMs ?? 0);
+
+  const footerParts = ['Tab next agent', 'd toggle view'];
+  if (capabilities.canSendInput) footerParts.push('i interactive');
+  if (capabilities.canKill) footerParts.push('k kill');
+  if (capabilities.canRestart) footerParts.push('r restart');
+  footerParts.push('q quit');
+  const footer = footerParts.join(' | ');
 
   return (
     <Box flexDirection="column">
@@ -48,15 +47,9 @@ export const DetailView = ({
           </Text>
           <Text dimColor>{agent.worktreePath}</Text>
           <Box borderStyle="round" flexDirection="column" paddingX={1}>
-            {outputLines.length === 0 ? (
-              <Text dimColor>No output yet.</Text>
-            ) : (
-              outputLines.map((line, index) => <Text key={`${index}-${line}`}>{line}</Text>)
-            )}
+            <TerminalView snapshot={agent.terminal} scrollOffset={scrollOffset} maxLines={24} />
           </Box>
-          <Text dimColor>
-            Tab next agent | d toggle view | i interactive | k kill | r restart | q quit
-          </Text>
+          <Text dimColor>{footer}</Text>
         </>
       ) : (
         <Text>No agents available.</Text>

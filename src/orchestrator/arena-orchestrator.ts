@@ -14,7 +14,8 @@ import { ensureTrustedFolder, registerTrustedFolders } from '../providers/truste
 import { getModelCachePath } from '../providers/model-cache';
 import { looksLikeInvalidModelError, type CommandExecutor } from '../providers/model-discovery';
 import type { ServerToClientMessage } from '../ipc/protocol';
-import { OutputBuffer } from '../utils/output-buffer';
+import type { TerminalSnapshot } from '../terminal/types';
+import { VirtualTerminal } from './virtual-terminal';
 import stripAnsi from 'strip-ansi';
 import type { ProcessTerminator } from '../utils/process';
 import { terminateProcessTree } from '../utils/process';
@@ -39,7 +40,8 @@ export const formatLaunchError = (providerName: string, command: string, error: 
 interface ManagedAgent {
   workspace: VariantWorkspace;
   status: AgentStatus;
-  outputBuffer: OutputBuffer;
+  vterm: VirtualTerminal;
+  pendingWrite: Promise<void>;
   process?: PtyProcess | undefined;
   pid?: number | undefined;
   startedAt?: number | undefined;
@@ -88,7 +90,8 @@ export class ArenaOrchestrator extends EventEmitter<{
       this.agents.set(workspace.variant.name, {
         workspace,
         status: 'pending',
-        outputBuffer: new OutputBuffer(),
+        vterm: new VirtualTerminal(),
+        pendingWrite: Promise.resolve(),
         checksPerformed: 0,
         interactive: false,
         killedByUser: false,
@@ -158,7 +161,9 @@ export class ArenaOrchestrator extends EventEmitter<{
       this.config.maxContinues
     );
 
-    agent.outputBuffer = new OutputBuffer();
+    agent.vterm.dispose();
+    agent.vterm = new VirtualTerminal();
+    agent.pendingWrite = Promise.resolve();
     agent.checksPerformed = 0;
     agent.killedByUser = false;
     agent.startedAt = this.now();
@@ -291,11 +296,19 @@ export class ArenaOrchestrator extends EventEmitter<{
     if (isTerminalStatus(agent.status)) {
       return;
     }
-    agent.outputBuffer.append(chunk);
-    this.emit('message', { type: 'agent-output', agent: agentName, chunk });
 
+    // Marker detection from plain text — synchronous, independent of xterm
     const provider = this.registry.get(agent.workspace.variant.provider);
     const plainChunk = stripAnsi(chunk);
+
+    // Write to VT and chain delta emission
+    agent.pendingWrite = agent.vterm.write(chunk).then(() => {
+      this.emit('message', {
+        type: 'agent-terminal',
+        agent: agentName,
+        delta: agent.vterm.getDelta()
+      });
+    });
 
     if (plainChunk.includes(provider.completionProtocol.doneMarker)) {
       void this.completeAgent(agentName, 0);
@@ -364,7 +377,7 @@ export class ArenaOrchestrator extends EventEmitter<{
     // Attempt model recovery for early failures that look like invalid model errors
     const elapsed = agent.startedAt ? this.now() - agent.startedAt : Infinity;
     const currentModel = agent.effectiveModel ?? agent.workspace.variant.model;
-    const outputText = agent.outputBuffer.getPlainText();
+    const outputText = agent.vterm.getPlainText();
     if (
       exitCode !== 0
       && elapsed < EARLY_FAILURE_THRESHOLD_MS
@@ -484,6 +497,20 @@ export class ArenaOrchestrator extends EventEmitter<{
     });
   }
 
+  public resizeAll(cols: number, rows: number): void {
+    for (const [, agent] of this.agents) {
+      agent.vterm.resize(cols, rows);
+      if (agent.process) {
+        agent.process.resize(cols, rows);
+      }
+    }
+  }
+
+  public getAgentTerminalSnapshot(agentName: string): TerminalSnapshot | undefined {
+    const agent = this.agents.get(agentName);
+    return agent?.vterm.getSnapshot();
+  }
+
   private toAgentSnapshot(agent: ManagedAgent): AgentSnapshot {
     const now = this.now();
     const startedAt = agent.startedAt ?? now;
@@ -497,8 +524,7 @@ export class ArenaOrchestrator extends EventEmitter<{
       status: agent.status,
       pid: agent.pid,
       elapsedMs: end - startedAt,
-      lineCount: agent.outputBuffer.getLineCount(),
-      outputLines: agent.outputBuffer.getLines(),
+      terminal: agent.vterm.getSnapshot(),
       checksPerformed: agent.checksPerformed,
       startedAt: agent.startedAt ? new Date(agent.startedAt).toISOString() : undefined,
       completedAt: agent.completedAt ? new Date(agent.completedAt).toISOString() : undefined,

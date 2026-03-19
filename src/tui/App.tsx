@@ -4,7 +4,7 @@ import type { ArenaSnapshot } from '../domain/types';
 import type { ArenaController } from './controller';
 import { Dashboard } from './components/Dashboard';
 import { DetailView } from './components/DetailView';
-import { applyServerMessage, hasActiveAgents } from './state';
+import { applyServerMessage, detectVersionGap, hasActiveAgents } from './state';
 
 type ViewMode = 'dashboard' | 'detail';
 
@@ -58,6 +58,9 @@ export const App = ({ controller, title, onExit }: AppProps): React.JSX.Element 
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState<string | null>(null);
 
+  const capabilities = controller.capabilities;
+  const isMonitor = capabilities.mode === 'monitor';
+
   useEffect(() => {
     let unsubscribed = false;
     void controller.loadSnapshot().then(
@@ -74,7 +77,15 @@ export const App = ({ controller, title, onExit }: AppProps): React.JSX.Element 
     );
 
     const unsubscribe = controller.subscribe((message) => {
-      setSnapshot((current) => (current ? applyServerMessage(current, message) : current));
+      setSnapshot((current) => {
+        if (!current) return current;
+        // Detect version gap and request snapshot recovery
+        const gapAgent = detectVersionGap(current, message);
+        if (gapAgent && controller.requestSnapshot) {
+          controller.requestSnapshot(gapAgent);
+        }
+        return applyServerMessage(current, message);
+      });
       if (message.type === 'error') {
         setError(message.message);
       }
@@ -107,8 +118,11 @@ export const App = ({ controller, title, onExit }: AppProps): React.JSX.Element 
     if (quitConfirm) {
       return 'Agents are still running. Press q again to terminate them and quit.';
     }
+    if (isMonitor) {
+      return 'Tab/1-9 switch agents, d toggles views, q exits monitor (arena keeps running).';
+    }
     return 'Tab/1-9 switch agents, d toggles views, q quits.';
-  }, [interactive, quitConfirm]);
+  }, [interactive, quitConfirm, isMonitor]);
 
   const requestExit = (): void => {
     void Promise.resolve(onExit?.()).finally(() => {
@@ -157,6 +171,11 @@ export const App = ({ controller, title, onExit }: AppProps): React.JSX.Element 
     }
 
     if (input === 'q') {
+      // Monitor: no confirmation, just disconnect and exit
+      if (isMonitor) {
+        requestExit();
+        return;
+      }
       if (hasActiveAgents(snapshot) && !quitConfirm) {
         setQuitConfirm(true);
         return;
@@ -178,24 +197,25 @@ export const App = ({ controller, title, onExit }: AppProps): React.JSX.Element 
       return;
     }
 
-    if (input === 'i' && currentAgent) {
+    // Guard mutation keybindings behind capabilities
+    if (input === 'i' && currentAgent && capabilities.canSendInput) {
       setInteractive(true);
       void controller.setInteractive?.(currentAgent.name, true);
       return;
     }
 
-    if (input === 'k' && currentAgent) {
+    if (input === 'k' && currentAgent && capabilities.canKill) {
       void controller.killAgent(currentAgent.name);
       return;
     }
 
-    if (input === 'r' && currentAgent) {
+    if (input === 'r' && currentAgent && capabilities.canRestart) {
       void controller.restartAgent(currentAgent.name);
       return;
     }
 
     if (key.upArrow) {
-      setScrollOffset((current) => Math.min(current + 1, Math.max(0, currentAgent?.outputLines.length ?? 0)));
+      setScrollOffset((current) => Math.min(current + 1, Math.max(0, currentAgent?.terminal.lines.length ?? 0)));
     } else if (key.downArrow) {
       setScrollOffset((current) => Math.max(0, current - 1));
     }
@@ -216,6 +236,7 @@ export const App = ({ controller, title, onExit }: AppProps): React.JSX.Element 
           scrollOffset={scrollOffset}
           interactive={interactive}
           now={now}
+          capabilities={capabilities}
         />
       )}
       <Text dimColor>{footer}</Text>

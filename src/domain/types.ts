@@ -1,3 +1,5 @@
+import type { TerminalSnapshot } from '../terminal/types';
+
 export type ProviderPromptDelivery = 'positional' | 'flag' | 'stdin';
 
 export type AgentStatus =
@@ -100,8 +102,7 @@ export interface AgentSnapshot {
   status: AgentStatus;
   pid?: number | undefined;
   elapsedMs: number;
-  lineCount: number;
-  outputLines: string[];
+  terminal: TerminalSnapshot;
   checksPerformed: number;
   startedAt?: string | undefined;
   completedAt?: string | undefined;

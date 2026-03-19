@@ -152,7 +152,9 @@ program
             await orchestrator.restartAgent(message.agent);
             break;
         }
-      }
+      },
+      agentTerminalSnapshotProvider: (agent) =>
+        orchestrator.getAgentTerminalSnapshot(agent),
     });
 
     orchestrator.on('message', (message) => {
@@ -198,6 +200,14 @@ program
     }
 
     const controller = new LocalArenaController(orchestrator);
+    // Resize PTYs and VTs when terminal dimensions change
+    if (process.stdout.isTTY) {
+      process.stdout.on('resize', () => {
+        const cols = process.stdout.columns ?? 120;
+        const rows = process.stdout.rows ?? 40;
+        orchestrator.resizeAll(cols, rows);
+      });
+    }
     await renderArenaApp(controller, 'Agent Arena', async () => {
       unregisterCleanup();
       await cleanup();
@@ -253,11 +263,9 @@ program
     const context = await loadRuntimeContext(name, logger);
     const session = await readSessionFile(context.paths.sessionFilePath);
     const client = new ArenaIpcClient();
-    const snapshotMessage = await client.connect(session.port);
-    const controller = new RemoteArenaController(client, snapshotMessage.snapshot);
-    await renderArenaApp(controller, 'Agent Arena Monitor', () => {
-      client.close();
-    });
+    const snapshotMessage = await client.connect(session.port, '127.0.0.1', 'monitor');
+    const controller = new RemoteArenaController(client, snapshotMessage.snapshot, 'monitor');
+    await renderArenaApp(controller, 'Agent Arena Monitor');
   });
 
 program
@@ -271,7 +279,7 @@ program
     if (await fileExists(context.paths.sessionFilePath)) {
       const session = await readSessionFile(context.paths.sessionFilePath);
       const client = new ArenaIpcClient();
-      const snapshot = await client.connect(session.port);
+      const snapshot = await client.connect(session.port, '127.0.0.1', 'controller');
       process.stdout.write(`${JSON.stringify(snapshot.snapshot, null, 2)}\n`);
       client.close();
       return;
@@ -289,8 +297,14 @@ program
         worktreePath: workspace.worktreePath,
         status: 'pending' as const,
         elapsedMs: 0,
-        lineCount: 0,
-        outputLines: [],
+        terminal: {
+          cols: 120,
+          rows: 40,
+          scrollback: 1000,
+          lines: [],
+          cursor: { row: 0, col: 0, visible: true },
+          version: 0,
+        },
         checksPerformed: 0,
         interactive: false
       }))
