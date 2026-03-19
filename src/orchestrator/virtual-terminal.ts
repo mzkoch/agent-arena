@@ -1,11 +1,15 @@
-import { Terminal } from '@xterm/headless';
-import { SerializeAddon } from '@xterm/addon-serialize';
+import type { Terminal as TerminalType } from '@xterm/headless';
+import type { SerializeAddon as SerializeAddonType } from '@xterm/addon-serialize';
+import xtermHeadless from '@xterm/headless';
+import xtermSerialize from '@xterm/addon-serialize';
+const { Terminal } = xtermHeadless;
+const { SerializeAddon } = xtermSerialize;
 import stripAnsi from 'strip-ansi';
 import type { TerminalCursor, TerminalDelta, TerminalSnapshot } from '../terminal/types';
 
 export class VirtualTerminal {
-  private readonly terminal: Terminal;
-  private readonly serializer: SerializeAddon;
+  private readonly terminal: TerminalType;
+  private readonly serializer: SerializeAddonType;
   private readonly dirtyRows = new Set<number>();
   private readonly lastEmitted = new Map<number, string>();
   private readonly plainTextChunks: string[] = [];
