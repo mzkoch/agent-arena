@@ -72,6 +72,34 @@ describe('ProviderRegistry', () => {
     expect(stdin.stdinPayload).toBe('hello\n');
   });
 
+  it('includes maxContinuesFlag in args for copilot-cli', () => {
+    const registry = new ProviderRegistry();
+    const provider = registry.get('copilot-cli');
+    const copilotVariant: VariantConfig = {
+      name: 'test',
+      provider: 'copilot-cli',
+      model: 'gpt-5',
+      techStack: 'TypeScript',
+      designPhilosophy: 'Clean',
+      branch: 'variant/test'
+    };
+    const command = buildProviderCommand(provider, copilotVariant, 'hello', 25);
+    expect(command.args).toContain('--max-autopilot-continues');
+    expect(command.args).toContain('25');
+    const flagIdx = command.args.indexOf('--max-autopilot-continues');
+    expect(command.args[flagIdx + 1]).toBe('25');
+  });
+
+  it('omits maxContinuesFlag when provider does not define it', () => {
+    const providerWithoutFlag: ProviderConfig = {
+      ...baseProvider,
+      maxContinuesFlag: undefined
+    };
+    const command = buildProviderCommand(providerWithoutFlag, variant, 'hello', 10);
+    expect(command.args).not.toContain('--max-steps');
+    expect(command.args).not.toContain('10');
+  });
+
   it('discovers models via registry method using cache', async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'registry-disc-'));
     const arenaDir = path.join(tempDir, '.arena');

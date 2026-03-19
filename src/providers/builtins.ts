@@ -13,6 +13,7 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     command: 'copilot',
     baseArgs: ['--autopilot', '--yolo'],
     modelFlag: '--model',
+    maxContinuesFlag: '--max-autopilot-continues',
     promptDelivery: 'flag',
     promptFlag: '-i',
     exitCommand: '/exit',
