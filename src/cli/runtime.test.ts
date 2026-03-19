@@ -1,10 +1,9 @@
-import { access, readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir, mkdtemp, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp } from 'node:fs/promises';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acceptVariant,
   checkUnmergedWork,
@@ -37,13 +36,15 @@ const createGitRepo = async (): Promise<string> => {
   return tempDir;
 };
 
+const VALID_MODELS = ['gpt-5', 'gpt-5.1', 'claude-sonnet-4.5', 'claude-opus-4.6', 'gemini-3-pro-preview'];
+
 /** Pre-populate model cache so validation runs instantly without spawning discovery. */
 const seedModelCache = async (gitRoot: string): Promise<void> => {
   const cacheDir = path.join(gitRoot, '.arena');
   await mkdir(cacheDir, { recursive: true });
   await saveModelCache(path.join(cacheDir, '.model-cache.json'), {
     'copilot-cli': {
-      models: ['gpt-5', 'gpt-5.1', 'claude-sonnet-4.5', 'claude-opus-4.6', 'gemini-3-pro-preview'],
+      models: VALID_MODELS,
       discoveredAt: new Date().toISOString(),
       ttlMs: 3_600_000
     }
@@ -342,20 +343,16 @@ const setupArenaWithModel = async (
   );
   await writeFile(path.join(arenaDir, 'requirements.md'), '# Requirements');
 
-  // Pre-populate model cache so validation runs without network
-  const cachePath = path.join(gitRoot, '.arena', '.model-cache.json');
-  await saveModelCache(cachePath, {
-    'copilot-cli': {
-      models: ['gpt-5', 'gpt-5.1', 'claude-opus-4.6', 'gemini-3-pro-preview'],
-      discoveredAt: new Date().toISOString(),
-      ttlMs: 3_600_000
-    }
-  });
+  await seedModelCache(gitRoot);
 
   return { gitRoot, arenaDir };
 };
 
 describe('model validation at CLI call sites (issue #40 regression)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('loadRuntimeContext throws on invalid model name', async () => {
     const { gitRoot } = await setupArenaWithModel('nonexistent-model');
 
@@ -447,8 +444,6 @@ describe('model validation at CLI call sites (issue #40 regression)', () => {
     const acceptOptions = acceptCall?.[2] as { gitRoot: string } | undefined;
     expect(acceptOptions).toBeDefined();
     expect(await realpath(acceptOptions!.gitRoot)).toBe(canonicalGitRoot);
-
-    loadArenaConfigSpy.mockRestore();
   });
 });
 
