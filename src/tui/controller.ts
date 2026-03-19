@@ -108,7 +108,6 @@ export class RemoteArenaController implements ArenaController {
   }
 
   public dispose(): void {
-    this.client.send({ type: 'disconnect' });
-    this.client.close();
+    this.client.disconnect();
   }
 }
