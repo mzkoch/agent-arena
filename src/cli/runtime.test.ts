@@ -1,10 +1,9 @@
-import { access, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir, mkdtemp, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acceptVariant,
   checkUnmergedWork,
@@ -18,6 +17,8 @@ import {
   setupWorkspacesForLaunch,
   validateArenaName
 } from './runtime';
+import * as loadModule from '../config/load';
+import { saveModelCache } from '../providers/model-cache';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,6 +34,21 @@ const createGitRepo = async (): Promise<string> => {
   await execFileAsync('git', ['init', tempDir]);
   await execFileAsync('git', ['-C', tempDir, '-c', 'user.name=Test', '-c', 'user.email=test@test.com', 'commit', '--allow-empty', '-m', 'init']);
   return tempDir;
+};
+
+const VALID_MODELS = ['gpt-5', 'gpt-5.1', 'claude-sonnet-4.5', 'claude-opus-4.6', 'gemini-3-pro-preview'];
+
+/** Pre-populate model cache so validation runs instantly without spawning discovery. */
+const seedModelCache = async (gitRoot: string): Promise<void> => {
+  const cacheDir = path.join(gitRoot, '.arena');
+  await mkdir(cacheDir, { recursive: true });
+  await saveModelCache(path.join(cacheDir, '.model-cache.json'), {
+    'copilot-cli': {
+      models: VALID_MODELS,
+      discoveredAt: new Date().toISOString(),
+      ttlMs: 3_600_000
+    }
+  });
 };
 
 describe('validateArenaName', () => {
@@ -158,6 +174,7 @@ describe('setupWorkspacesForLaunch', () => {
   it('creates worktrees with variant files in .arena/ subdir', async () => {
     const gitRoot = await createGitRepo();
     await createArena(gitRoot, 'launch-test', {}, logger);
+    await seedModelCache(gitRoot);
 
     const origCwd = process.cwd();
     process.chdir(gitRoot);
@@ -195,6 +212,7 @@ describe('acceptVariant', () => {
       configSource: configPath,
       requirementsSource: reqPath
     }, logger);
+    await seedModelCache(gitRoot);
 
     const origCwd = process.cwd();
     process.chdir(gitRoot);
@@ -218,6 +236,7 @@ describe('acceptVariant', () => {
   it('rejects unknown variant names', async () => {
     const gitRoot = await createGitRepo();
     await createArena(gitRoot, 'reject-test', {}, logger);
+    await seedModelCache(gitRoot);
 
     await expect(
       acceptVariant(gitRoot, 'reject-test', 'nonexistent', logger)
@@ -229,6 +248,7 @@ describe('checkUnmergedWork', () => {
   it('returns empty when no branches have work', async () => {
     const gitRoot = await createGitRepo();
     await createArena(gitRoot, 'check-test', {}, logger);
+    await seedModelCache(gitRoot);
 
     const origCwd = process.cwd();
     process.chdir(gitRoot);
@@ -244,6 +264,7 @@ describe('checkUnmergedWork', () => {
   it('returns warnings for branches with unmerged commits', async () => {
     const gitRoot = await createGitRepo();
     await createArena(gitRoot, 'safety-test', {}, logger);
+    await seedModelCache(gitRoot);
 
     const origCwd = process.cwd();
     process.chdir(gitRoot);
@@ -271,6 +292,7 @@ describe('checkUnmergedWork', () => {
   it('detects uncommitted changes in worktrees', async () => {
     const gitRoot = await createGitRepo();
     await createArena(gitRoot, 'dirty-test', {}, logger);
+    await seedModelCache(gitRoot);
 
     const origCwd = process.cwd();
     process.chdir(gitRoot);
@@ -292,6 +314,137 @@ describe('checkUnmergedWork', () => {
     }
   });
 
+});
+
+/**
+ * Helper: set up a git repo with an arena containing a specific model name and
+ * a pre-populated model cache so validation can run without network calls.
+ */
+const setupArenaWithModel = async (
+  modelName: string,
+  arenaName: string = 'test-arena'
+): Promise<{ gitRoot: string; arenaDir: string }> => {
+  const gitRoot = await createGitRepo();
+  const arenaDir = path.join(gitRoot, '.arena', arenaName);
+  await mkdir(arenaDir, { recursive: true });
+
+  await writeFile(
+    path.join(arenaDir, 'arena.json'),
+    JSON.stringify({
+      variants: [
+        {
+          name: 'variant-1',
+          model: modelName,
+          techStack: 'TypeScript',
+          designPhilosophy: 'Clean'
+        }
+      ]
+    })
+  );
+  await writeFile(path.join(arenaDir, 'requirements.md'), '# Requirements');
+
+  await seedModelCache(gitRoot);
+
+  return { gitRoot, arenaDir };
+};
+
+describe('model validation at CLI call sites (issue #40 regression)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('loadRuntimeContext throws on invalid model name', async () => {
+    const { gitRoot } = await setupArenaWithModel('nonexistent-model');
+
+    const origCwd = process.cwd();
+    process.chdir(gitRoot);
+    try {
+      await expect(
+        loadRuntimeContext('test-arena', logger)
+      ).rejects.toThrow(/model validation failed/i);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  it('loadRuntimeContext succeeds with valid model', async () => {
+    const { gitRoot } = await setupArenaWithModel('gpt-5');
+
+    const origCwd = process.cwd();
+    process.chdir(gitRoot);
+    try {
+      const context = await loadRuntimeContext('test-arena', logger);
+      expect(context.config.variants[0]!.model).toBe('gpt-5');
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  it('acceptVariant throws on invalid model name', async () => {
+    const { gitRoot } = await setupArenaWithModel('nonexistent-model');
+
+    await expect(
+      acceptVariant(gitRoot, 'test-arena', 'variant-1', logger)
+    ).rejects.toThrow(/model validation failed/i);
+  });
+
+  it('listArenas does NOT trigger model validation (skips it)', async () => {
+    const { gitRoot } = await setupArenaWithModel('nonexistent-model');
+
+    // If validation ran, this would throw. It should succeed silently.
+    const arenas = await listArenas(gitRoot, logger);
+    expect(arenas).toHaveLength(1);
+    expect(arenas[0]!.name).toBe('test-arena');
+    expect(arenas[0]!.variantCount).toBe(1);
+  });
+
+  it('invalid model produces actionable error with suggestion', async () => {
+    const { gitRoot } = await setupArenaWithModel('gemini-3-pro');
+
+    const origCwd = process.cwd();
+    process.chdir(gitRoot);
+    try {
+      await expect(
+        loadRuntimeContext('test-arena', logger)
+      ).rejects.toThrow(/did you mean "gemini-3-pro-preview"/i);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  it('passes gitRoot to loadArenaConfig at every call site', async () => {
+    const { gitRoot } = await setupArenaWithModel('gpt-5');
+    const loadArenaConfigSpy = vi.spyOn(loadModule, 'loadArenaConfig');
+
+    const origCwd = process.cwd();
+    process.chdir(gitRoot);
+    try {
+      await loadRuntimeContext('test-arena', logger);
+    } finally {
+      process.chdir(origCwd);
+    }
+    await listArenas(gitRoot, logger);
+    await expect(
+      acceptVariant(gitRoot, 'test-arena', 'missing-variant', logger)
+    ).rejects.toThrow(/not found/i);
+
+    expect(loadArenaConfigSpy).toHaveBeenCalledTimes(3);
+
+    const [runtimeCall, listCall, acceptCall] = loadArenaConfigSpy.mock.calls;
+    const canonicalGitRoot = await realpath(gitRoot);
+
+    const runtimeOptions = runtimeCall?.[2] as { gitRoot: string } | undefined;
+    expect(runtimeOptions).toBeDefined();
+    expect(await realpath(runtimeOptions!.gitRoot)).toBe(canonicalGitRoot);
+
+    const listOptions = listCall?.[2] as { gitRoot: string; skipModelValidation?: boolean } | undefined;
+    expect(listOptions).toMatchObject({ skipModelValidation: true });
+    expect(await realpath(listOptions!.gitRoot)).toBe(canonicalGitRoot);
+
+    const acceptOptions = acceptCall?.[2] as { gitRoot: string } | undefined;
+    expect(acceptOptions).toBeDefined();
+    expect(await realpath(acceptOptions!.gitRoot)).toBe(canonicalGitRoot);
+  });
 });
 
 describe('cli runtime helpers (legacy)', () => {
@@ -405,6 +558,7 @@ describe('cli runtime helpers (legacy)', () => {
       })
     );
     await writeFile(path.join(arenaDir, 'requirements.md'), '# Req');
+    await seedModelCache(gitRoot);
 
     const origCwd = process.cwd();
     process.chdir(gitRoot);
@@ -467,6 +621,7 @@ describe('cli runtime helpers (legacy)', () => {
       })
     );
     await writeFile(path.join(arenaDir, 'requirements.md'), '# Named');
+    await seedModelCache(gitRoot);
 
     const origCwd = process.cwd();
     process.chdir(gitRoot);
