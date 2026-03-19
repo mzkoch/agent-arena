@@ -191,20 +191,57 @@ The headless launcher writes `.arena/<name>/session.json`:
 }
 ```
 
-### Server to client
-
-- `snapshot`
-- `agent-output`
-- `agent-state`
-- `error`
-
 ### Client to server
 
-- `input`
-- `kill`
-- `restart`
+- `connect` — handshake with `clientType: 'controller' | 'monitor'`; server responds with `snapshot`
+- `disconnect` — clean shutdown; server destroys socket
+- `input` — send keystrokes to an agent's PTY
+- `kill` — terminate an agent process
+- `restart` — restart an agent process
+- `request-snapshot` — request a full `TerminalSnapshot` for a specific agent (used for delta version-gap recovery)
 
-The monitor client receives a snapshot immediately on connect, then applies streamed updates to stay current.
+### Server to client
+
+- `snapshot` — full `ArenaSnapshot` sent after `connect` handshake
+- `agent-terminal` — incremental `TerminalDelta` (version, changed lines, cursor) for a specific agent
+- `agent-terminal-snapshot` — full `TerminalSnapshot` for a specific agent (response to `request-snapshot`)
+- `agent-state` — agent metadata update (status, elapsed, pid, exit code — no terminal output)
+- `error` — error message (e.g., monitor client attempted a mutating action)
+
+### Connection lifecycle
+
+1. Client opens TCP connection and sends `connect` with its `clientType`
+2. Server registers the client type, adds it to `readySockets`, and responds with a `snapshot`
+3. Server streams `agent-terminal` deltas and `agent-state` updates to all ready sockets
+4. Monitor clients are read-only: the server rejects `input`, `kill`, and `restart` from monitor-type clients
+5. Client sends `disconnect` before closing; server cleans up the socket gracefully
+6. On unexpected disconnect, `ReconnectingIpcClient` retries with exponential backoff (1s base, 1.5× multiplier, max 10 retries)
+
+### VirtualTerminal
+
+Each agent's PTY output is processed through a `VirtualTerminal` wrapping `@xterm/headless` with `@xterm/addon-serialize`. The terminal:
+
+- Accepts PTY data via a promise-queue write model using xterm's public `write(data, callback)` API
+- Tracks dirty rows (marks all viewport rows on each write) and generates `TerminalDelta` diffs
+- Serializes rows with ANSI escape codes preserved via `SerializeAddon.serialize({ range })` per row
+- Maintains a plain-text accumulator (`stripAnsi`) for synchronous completion-marker detection
+- Caches snapshots with a dirty flag to avoid redundant serialization
+
+### Controller capabilities
+
+The TUI derives behavior from a capabilities object rather than branching on mode strings:
+
+```typescript
+interface ArenaControllerCapabilities {
+  mode: 'local' | 'monitor';
+  canSendInput: boolean;
+  canKill: boolean;
+  canRestart: boolean;
+  canResizePty: boolean;
+}
+```
+
+Local controllers have full capabilities. Monitor controllers are read-only (`canSendInput: false`, etc.). The TUI conditionally renders keybindings based on these capabilities, and monitor mode skips the quit confirmation dialog.
 
 ## Evaluation Strategy
 
