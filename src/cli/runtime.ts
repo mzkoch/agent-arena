@@ -34,7 +34,7 @@ export const loadRuntimeContext = async (
   const gitRoot = await findGitRoot();
   const name = await resolveArenaName(gitRoot, arenaName);
   const paths = resolveArenaPaths(gitRoot, name);
-  const config = await loadArenaConfig(paths.configPath, name);
+  const config = await loadArenaConfig(paths.configPath, name, { gitRoot });
   const requirementsContent = await readTextFile(paths.requirementsPath);
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   const workspaces = buildVariantWorkspaces(paths, config.variants);
@@ -182,7 +182,7 @@ export const listArenas = async (
     let variantCount = 0;
 
     try {
-      const config = await loadArenaConfig(paths.configPath, name);
+      const config = await loadArenaConfig(paths.configPath, name, { gitRoot, skipModelValidation: true });
       variantCount = config.variants.length;
     } catch {
       // Config may be invalid template — still show it
@@ -226,7 +226,7 @@ export const acceptVariant = async (
 ): Promise<string> => {
   const repository = new GitRepositoryManager(new NodeCommandRunner(), logger);
   const paths = resolveArenaPaths(gitRoot, arenaName);
-  const config = await loadArenaConfig(paths.configPath, arenaName);
+  const config = await loadArenaConfig(paths.configPath, arenaName, { gitRoot });
 
   const variant = config.variants.find((v) => v.name === variantName);
   if (!variant) {
