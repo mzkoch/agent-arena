@@ -7,7 +7,7 @@ describe('resolveCommand', () => {
     const resolved = resolveCommand('node');
     expect(path.isAbsolute(resolved)).toBe(true);
     expect(resolved).toContain('node');
-  });
+  }, 15_000);
 
   it('returns absolute paths as-is', () => {
     const abs = '/usr/local/bin/my-tool';

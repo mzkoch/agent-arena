@@ -19,7 +19,8 @@ export const resolveCommand = (command: string): string => {
   try {
     const result = execFileSync(tool, [command], {
       encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10_000
     }).trim();
 
     // `where` on Windows may return multiple lines — take the first match
