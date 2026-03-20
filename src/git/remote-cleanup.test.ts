@@ -49,6 +49,7 @@ const createMockRepo = (overrides: Partial<MockRepo> = {}): GitRepositoryManager
     getDiffNumStatRaw: vi.fn(),
     getUntrackedFiles: vi.fn(),
     getCommitCountSinceRef: vi.fn(),
+    isAncestorOf: vi.fn().mockResolvedValue(false),
   };
   return { ...base, ...overrides } as unknown as GitRepositoryManager;
 };
@@ -163,6 +164,61 @@ describe('planRemoteCleanup', () => {
       refExists: vi.fn((_path: string, ref: string) => {
         return Promise.resolve(ref === 'refs/tags/accept/test/variant-a');
       })
+    });
+
+    const plan = await planRemoteCleanup({
+      repository: repo,
+      gitRoot: '/repo',
+      arenaName: 'test',
+      branches: ['arena/test/variant-a'],
+      logger: silentLogger
+    });
+
+    expect(plan.toDelete).not.toContain('arena/test/variant-a');
+    expect(plan.toSkip).toContainEqual(
+      expect.objectContaining({ branch: 'arena/test/variant-a', reason: expect.stringMatching(/not yet on remote/) })
+    );
+  });
+
+  it('deletes accepted branch when accept ref is local-only but merged into base', async () => {
+    const remoteRefs = new Map([
+      ['refs/heads/arena/test/variant-a', 'aaa111']
+    ]);
+
+    const repo = createMockRepo({
+      listRemoteRefs: vi.fn().mockResolvedValue(remoteRefs),
+      refExists: vi.fn((_path: string, ref: string) => {
+        return Promise.resolve(ref === 'refs/heads/accept/test/variant-a');
+      }),
+      resolveBaseRef: vi.fn().mockResolvedValue('main'),
+      isAncestorOf: vi.fn().mockResolvedValue(true)
+    });
+
+    const plan = await planRemoteCleanup({
+      repository: repo,
+      gitRoot: '/repo',
+      arenaName: 'test',
+      branches: ['arena/test/variant-a'],
+      logger: silentLogger
+    });
+
+    expect(plan.toDelete).toContain('arena/test/variant-a');
+    expect(plan.toSkip).not.toContainEqual(
+      expect.objectContaining({ branch: 'arena/test/variant-a' })
+    );
+  });
+
+  it('skips accepted branch when resolveBaseRef fails', async () => {
+    const remoteRefs = new Map([
+      ['refs/heads/arena/test/variant-a', 'aaa111']
+    ]);
+
+    const repo = createMockRepo({
+      listRemoteRefs: vi.fn().mockResolvedValue(remoteRefs),
+      refExists: vi.fn((_path: string, ref: string) => {
+        return Promise.resolve(ref === 'refs/heads/accept/test/variant-a');
+      }),
+      resolveBaseRef: vi.fn().mockRejectedValue(new Error('no base ref'))
     });
 
     const plan = await planRemoteCleanup({

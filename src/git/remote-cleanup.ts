@@ -160,9 +160,22 @@ export const planRemoteCleanup = async (
       continue;
     }
 
-    // Accepted locally only: skip deletion — accept branch not yet pushed to remote
+    // Accepted locally only: check if the accept branch was already merged into base
     if (await isAcceptedLocally(repository, gitRoot, arenaName, variantName)) {
-      toSkip.push({ branch, reason: 'accepted (accept branch not yet on remote)' });
+      const acceptBranch = `accept/${arenaName}/${variantName}`;
+      let merged = false;
+      try {
+        const baseRef = await repository.resolveBaseRef(gitRoot);
+        merged = await repository.isAncestorOf(gitRoot, acceptBranch, baseRef);
+      } catch {
+        // If we can't resolve base ref, fall through to skip
+      }
+      if (merged) {
+        logger.info('Accepted variant arena branch will be deleted (accept branch merged into base)', { branch });
+        toDelete.push(branch);
+      } else {
+        toSkip.push({ branch, reason: 'accepted (accept branch not yet on remote)' });
+      }
       continue;
     }
 
