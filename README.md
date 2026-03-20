@@ -70,8 +70,17 @@ Each arena launch writes diagnostics under `.arena/<name>/logs/`:
 Useful commands:
 
 ```bash
-tail -f .arena/default/logs/alpha.log
-jq -c '.' .arena/default/logs/session.jsonl
+# Watch a variant's live output
+tail -f .arena/my-arena/logs/alpha.log
+
+# Browse all session events
+jq '.' .arena/my-arena/logs/session.jsonl
+
+# Filter events for a specific variant
+grep '"variant":"alpha"' .arena/my-arena/logs/session.jsonl | jq .
+
+# Show only completion events
+jq 'select(.event == "agent.complete")' .arena/my-arena/logs/session.jsonl
 ```
 
 ### 4. Evaluate and accept

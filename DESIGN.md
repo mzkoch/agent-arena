@@ -116,12 +116,48 @@ The orchestrator emits full agent state updates and incremental output chunks. T
 
 ### 9. Structured diagnostics logging
 
-Each launch also produces arena-side diagnostics logs under `.arena/<name>/logs/`:
+Arena writes structured diagnostics to `.arena/<name>/logs/` for post-mortem analysis of agent runs. All logging is fire-and-forget — logging failures never crash the arena.
 
-- `session.jsonl` is an append-only JSONL stream where each line is a single event shaped like `{ "ts": "<ISO8601>", "event": "<name>", ...data }`
-- `<variant>.log` captures the raw PTY stream for that variant as timestamped chunks in the form `[<ISO8601>] <chunk>`
+#### File Layout
 
-The orchestrator writes lifecycle events for arena start, agent spawn/state transitions, idle checks and responses, process exits, completion/failure, model recovery, and the final `arena.summary`. `warn()` and `error()` calls are also forwarded into the structured session log so diagnostics remain available even when stderr output is noisy or ephemeral.
+```
+.arena/<name>/logs/
+├── session.jsonl      # Structured event log (JSONL format)
+├── alpha.log          # Raw PTY output for variant "alpha"
+└── beta.log           # Raw PTY output for variant "beta"
+```
+
+#### JSONL Format
+
+Each line in `session.jsonl` is a self-contained JSON object with at minimum `ts` (ISO 8601 timestamp) and `event` (event type string):
+
+```json
+{"ts":"2026-03-20T00:00:00.000Z","event":"arena.start","variants":["alpha","beta"],"maxContinues":50,"agentTimeoutMs":3600000}
+{"ts":"2026-03-20T00:00:01.000Z","event":"agent.spawn","variant":"alpha","pid":12345,"command":"copilot","model":"gpt-4"}
+{"ts":"2026-03-20T00:00:02.000Z","event":"agent.state","variant":"alpha","from":"pending","to":"running"}
+```
+
+#### Event Types
+
+| Event | Description | Key Fields |
+|---|---|---|
+| `arena.start` | Arena session begins | variants, maxContinues, agentTimeoutMs |
+| `agent.spawn` | Agent process launched | variant, pid, command, args, model, worktreePath |
+| `agent.state` | Agent status transition | variant, from, to |
+| `agent.idle_check` | Idle timeout triggered | variant, checksPerformed |
+| `agent.idle_response` | Marker detected in output | variant, markerMatched (done/continue/null) |
+| `agent.exit` | Agent process exited | variant, exitCode, durationMs, signal |
+| `agent.complete` | Agent completed | variant, reason (done_marker/max_checks/process_exit), exitCode |
+| `agent.fail` | Agent failed | variant, error, exitCode |
+| `agent.model_recovery` | Model name corrected | variant, originalModel, resolvedModel |
+| `arena.summary` | Session summary | agents array, errors, warnings |
+| `warning` / `error` | Logger interface events | message, context fields |
+
+#### Architecture
+
+The `ArenaLogger` interface extends the base `Logger` interface with domain-specific methods (`logEvent`, `logPty`, `writeSummary`, `close`). `FileArenaLogger` implements this interface using async file handles for non-blocking I/O.
+
+The logger is injected into `ArenaOrchestrator` via the `OrchestratorDependencies` interface as an optional field, accessed through optional chaining to maintain backward compatibility. `warn()` and `error()` calls are forwarded into the structured session log so diagnostics remain available even when stderr output is noisy or ephemeral.
 
 ## Module Layout
 
