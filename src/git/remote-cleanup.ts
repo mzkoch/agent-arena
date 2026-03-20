@@ -130,6 +130,19 @@ export const planRemoteCleanup = async (
   const toDelete: string[] = [];
   const toSkip: Array<{ branch: string; reason: string }> = [];
 
+  // Lazily resolved once on first need; invariant across all branches
+  let cachedBaseRef: string | null | undefined;
+  const getBaseRef = async (): Promise<string | null> => {
+    if (cachedBaseRef === undefined) {
+      try {
+        cachedBaseRef = await repository.resolveBaseRef(gitRoot);
+      } catch {
+        cachedBaseRef = null;
+      }
+    }
+    return cachedBaseRef;
+  };
+
   for (const branch of branches) {
     const variantName = extractVariantName(branch, arenaName);
 
@@ -163,13 +176,8 @@ export const planRemoteCleanup = async (
     // Accepted locally only: check if the accept branch was already merged into base
     if (await isAcceptedLocally(repository, gitRoot, arenaName, variantName)) {
       const acceptBranch = `accept/${arenaName}/${variantName}`;
-      let merged = false;
-      try {
-        const baseRef = await repository.resolveBaseRef(gitRoot);
-        merged = await repository.isAncestorOf(gitRoot, acceptBranch, baseRef);
-      } catch {
-        // If we can't resolve base ref, fall through to skip
-      }
+      const baseRef = await getBaseRef();
+      const merged = baseRef !== null && await repository.isAncestorOf(gitRoot, acceptBranch, baseRef);
       if (merged) {
         logger.info('Accepted variant arena branch will be deleted (accept branch merged into base)', { branch });
         toDelete.push(branch);
