@@ -185,4 +185,39 @@ describe('ArenaProject', () => {
     const second = await readFile(path.join(gitRoot, '.gitignore'), 'utf8');
     expect(second).toBe(first);
   });
+
+  it('creates .gitignore from scratch when none exists', async () => {
+    const gitRoot = await createGitRepo();
+    const project = await ArenaProject.scaffold(gitRoot);
+
+    // Ensure there is no .gitignore yet
+    const gitignorePath = path.join(gitRoot, '.gitignore');
+    try { await access(gitignorePath); expect.fail('Expected no .gitignore'); } catch { /* expected */ }
+
+    await project.ensureGitignore();
+    const content = await readFile(gitignorePath, 'utf8');
+    expect(content).toContain('# Arena');
+    expect(content).toContain('.arena/');
+  });
+
+  it('appends to .gitignore without trailing newline', async () => {
+    const gitRoot = await createGitRepo();
+    const gitignorePath = path.join(gitRoot, '.gitignore');
+    await writeFile(gitignorePath, 'node_modules/'); // no trailing newline
+
+    const project = await ArenaProject.scaffold(gitRoot, 'test');
+    await project.ensureGitignore();
+
+    const content = await readFile(gitignorePath, 'utf8');
+    expect(content).toContain('node_modules/');
+    expect(content).toContain('.arena/');
+    // Should have proper separation
+    expect(content).toContain('\n# Arena\n');
+  });
+
+  it('scaffold uses default name when none provided', async () => {
+    const gitRoot = await createGitRepo();
+    const project = await ArenaProject.scaffold(gitRoot);
+    expect(project.paths.arenaName).toBe('default');
+  });
 });
