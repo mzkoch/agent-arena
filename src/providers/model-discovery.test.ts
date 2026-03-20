@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   parseChoicesFlag,
+  parseModelList,
   discoverModels,
   discoverModelsFromConfig,
   levenshteinDistance,
@@ -53,6 +54,47 @@ describe('parseChoicesFlag', () => {
   });
 });
 
+describe('parseModelList', () => {
+  it('extracts model names from plain-text output', () => {
+    const output = 'gpt-5\nclaude-opus-4.6\ngemini-3-pro-preview\n';
+    expect(parseModelList(output)).toEqual(['gpt-5', 'claude-opus-4.6', 'gemini-3-pro-preview']);
+  });
+
+  it('filters out non-model lines', () => {
+    const output = 'Here are the models:\ngpt-5\nclaude-opus-4.6\n\nTotal: 2 models';
+    expect(parseModelList(output)).toEqual(['gpt-5', 'claude-opus-4.6']);
+  });
+
+  it('handles Windows line endings', () => {
+    const output = 'gpt-5\r\nclaude-opus-4.6\r\n';
+    expect(parseModelList(output)).toEqual(['gpt-5', 'claude-opus-4.6']);
+  });
+
+  it('trims whitespace from model names', () => {
+    const output = '  gpt-5  \n  claude-opus-4.6  \n';
+    expect(parseModelList(output)).toEqual(['gpt-5', 'claude-opus-4.6']);
+  });
+
+  it('returns empty array for no valid model names', () => {
+    const output = 'No models available\nPlease check your configuration';
+    expect(parseModelList(output)).toEqual([]);
+  });
+
+  it('accepts model names with dots, colons, and underscores', () => {
+    const output = 'gpt-5.1\nmodel:variant\nmy_model\n';
+    expect(parseModelList(output)).toEqual(['gpt-5.1', 'model:variant', 'my_model']);
+  });
+
+  it('rejects lines starting with special characters', () => {
+    const output = '-invalid\n.invalid\n:invalid\ngpt-5\n';
+    expect(parseModelList(output)).toEqual(['gpt-5']);
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(parseModelList('')).toEqual([]);
+  });
+});
+
 describe('discoverModels', () => {
   it('returns supportedModels when static list is provided', async () => {
     const provider = makeProvider({
@@ -84,7 +126,7 @@ describe('discoverModels', () => {
 
     const result = await discoverModels(provider, executor);
     expect(result).toEqual(['gpt-5', 'gpt-5.1']);
-    expect(executor).toHaveBeenCalledWith('copilot', ['--help'], { timeout: 5000 });
+    expect(executor).toHaveBeenCalledWith('copilot', ['--help'], { timeout: 30000 });
   });
 
   it('returns null when command fails (not found)', async () => {
@@ -176,6 +218,36 @@ describe('discoverModelsFromConfig', () => {
     };
     const result = await discoverModelsFromConfig(config, executor);
     expect(result).toEqual(['gpt-5']);
+  });
+
+  it('discovers models using prompt-models strategy', async () => {
+    const executor: CommandExecutor = vi.fn().mockResolvedValue({
+      stdout: 'gpt-5\nclaude-opus-4.6\ngemini-3-pro-preview\n',
+      stderr: ''
+    });
+
+    const config: ModelDiscoveryConfig = {
+      command: 'copilot',
+      args: ['-p', 'list models'],
+      parseStrategy: 'prompt-models'
+    };
+    const result = await discoverModelsFromConfig(config, executor);
+    expect(result).toEqual(['gpt-5', 'claude-opus-4.6', 'gemini-3-pro-preview']);
+  });
+
+  it('filters non-model lines from prompt-models output', async () => {
+    const executor: CommandExecutor = vi.fn().mockResolvedValue({
+      stdout: 'gpt-5\nclaude-opus-4.6\n\nTotal usage est:        3 Premium requests\nAPI time spent:         6s\n',
+      stderr: ''
+    });
+
+    const config: ModelDiscoveryConfig = {
+      command: 'copilot',
+      args: ['-p', 'list models'],
+      parseStrategy: 'prompt-models'
+    };
+    const result = await discoverModelsFromConfig(config, executor);
+    expect(result).toEqual(['gpt-5', 'claude-opus-4.6']);
   });
 });
 

@@ -4,7 +4,7 @@ import type { ModelDiscoveryConfig, ProviderConfig } from '../domain/types';
 
 const execFileAsync = promisify(execFile);
 
-const DISCOVERY_TIMEOUT_MS = 5_000;
+const DISCOVERY_TIMEOUT_MS = 30_000;
 
 export interface CommandExecutor {
   (command: string, args: string[], options: { timeout: number }): Promise<{ stdout: string; stderr: string }>;
@@ -50,8 +50,20 @@ export const parseChoicesFlag = (output: string): string[] => {
   return models;
 };
 
+/**
+ * Parse models from plain-text output where each line is a model name.
+ * Filters out empty lines and lines that don't look like model identifiers.
+ */
+export const parseModelList = (output: string): string[] => {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && /^[a-z0-9][\w.:-]*$/i.test(line));
+};
+
 const parseStrategies: Record<string, (output: string) => string[]> = {
-  'choices-flag': parseChoicesFlag
+  'choices-flag': parseChoicesFlag,
+  'prompt-models': parseModelList
 };
 
 /**

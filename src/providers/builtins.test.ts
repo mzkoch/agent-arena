@@ -22,4 +22,29 @@ describe('BUILTIN_PROVIDERS', () => {
       }
     }
   });
+
+  it('copilot-cli uses prompt-models discovery strategy', () => {
+    const provider = BUILTIN_PROVIDERS['copilot-cli'];
+    expect(provider!.modelDiscovery).toBeDefined();
+    expect(provider!.modelDiscovery!.parseStrategy).toBe('prompt-models');
+    expect(provider!.modelDiscovery!.command).toBe('copilot');
+    expect(provider!.modelDiscovery!.args).toContain('-p');
+  });
+
+  it('claude-code uses prompt-models discovery strategy', () => {
+    const provider = BUILTIN_PROVIDERS['claude-code'];
+    expect(provider!.modelDiscovery).toBeDefined();
+    expect(provider!.modelDiscovery!.parseStrategy).toBe('prompt-models');
+    expect(provider!.modelDiscovery!.command).toBe('claude');
+    expect(provider!.modelDiscovery!.args).toContain('-p');
+  });
+
+  it('both providers share the same discovery prompt', () => {
+    const copilot = BUILTIN_PROVIDERS['copilot-cli']!.modelDiscovery!;
+    const claude = BUILTIN_PROVIDERS['claude-code']!.modelDiscovery!;
+    // Both should use -p flag followed by the same prompt text
+    expect(copilot.args[0]).toBe('-p');
+    expect(claude.args[0]).toBe('-p');
+    expect(copilot.args[1]).toBe(claude.args[1]);
+  });
 });
