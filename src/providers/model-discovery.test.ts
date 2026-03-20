@@ -220,6 +220,22 @@ describe('discoverModelsFromConfig', () => {
     expect(result).toEqual(['gpt-5']);
   });
 
+  it('joins stdout and stderr with newline to preserve line boundaries', async () => {
+    const executor: CommandExecutor = vi.fn().mockResolvedValue({
+      stdout: 'gpt-5\nclaude-opus-4.6',
+      stderr: 'some warning on stderr'
+    });
+
+    const config: ModelDiscoveryConfig = {
+      command: 'copilot',
+      args: ['-p', 'list models'],
+      parseStrategy: 'prompt-models'
+    };
+    const result = await discoverModelsFromConfig(config, executor);
+    // Without newline join, last stdout line would merge with stderr
+    expect(result).toEqual(['gpt-5', 'claude-opus-4.6']);
+  });
+
   it('discovers models using prompt-models strategy', async () => {
     const executor: CommandExecutor = vi.fn().mockResolvedValue({
       stdout: 'gpt-5\nclaude-opus-4.6\ngemini-3-pro-preview\n',

@@ -103,7 +103,7 @@ export const discoverModelsFromConfig = async (
     const { stdout, stderr } = await executor(config.command, config.args, {
       timeout: DISCOVERY_TIMEOUT_MS
     });
-    const output = stdout + stderr;
+    const output = [stdout, stderr].filter(Boolean).join('\n');
     const models = parseFn(output);
     return models.length > 0 ? models : null;
   } catch {
