@@ -528,6 +528,18 @@ export class GitRepositoryManager {
     const count = Number.parseInt(stdout.trim(), 10);
     return Number.isNaN(count) ? 0 : count;
   }
+
+  /**
+   * Check if `commitish` is an ancestor of `baseRef` (i.e., merged into it).
+   * Returns false if either ref does not exist.
+   */
+  public async isAncestorOf(repoPath: string, commitish: string, baseRef: string): Promise<boolean> {
+    const result = await this.runner.run(
+      'git',
+      gitArgs(repoPath, ['merge-base', '--is-ancestor', commitish, baseRef])
+    );
+    return result.exitCode === 0;
+  }
 }
 
 export const buildVariantWorkspaces = (

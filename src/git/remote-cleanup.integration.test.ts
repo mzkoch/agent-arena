@@ -244,6 +244,84 @@ describe('Remote branch cleanup integration', () => {
     );
   }, 30_000);
 
+  it('deletes arena branch when accept branch is merged into base and deleted from remote', async () => {
+    const { gitRoot, remoteDir } = await createRemoteBackedRepo();
+    const manager = new GitRepositoryManager(new NodeCommandRunner(), silentLogger);
+
+    // Push an arena variant branch
+    await pushBranch(gitRoot, 'arena/test/variant-merged');
+
+    // Accept the variant by creating an accept branch
+    await execFileAsync('git', ['-C', gitRoot, 'checkout', '-b', 'accept/test/variant-merged', 'arena/test/variant-merged']);
+    await execFileAsync('git', ['-C', gitRoot, 'push', 'origin', 'accept/test/variant-merged']);
+    await execFileAsync('git', ['-C', gitRoot, 'checkout', '-']);
+
+    // Simulate PR merge: merge accept branch into main, then delete it from remote
+    // (mimics GitHub's "delete branch after merge" behavior)
+    await execFileAsync('git', ['-C', gitRoot, 'merge', 'accept/test/variant-merged', '--no-edit']);
+    await execFileAsync('git', ['-C', gitRoot, 'push', 'origin', 'HEAD']);
+    await execFileAsync('git', ['-C', gitRoot, 'push', 'origin', '--delete', 'accept/test/variant-merged']);
+
+    // Verify: accept branch is gone from remote, but still exists locally
+    expect(await remoteHasBranch(remoteDir, 'accept/test/variant-merged')).toBe(false);
+    const { stdout } = await execFileAsync('git', ['-C', gitRoot, 'branch', '--list', 'accept/test/variant-merged']);
+    expect(stdout.trim()).toContain('accept/test/variant-merged');
+
+    // Plan cleanup — should delete the arena branch (not skip it)
+    const plan = await planRemoteCleanup({
+      repository: manager,
+      gitRoot,
+      arenaName: 'test',
+      branches: ['arena/test/variant-merged'],
+      logger: silentLogger
+    });
+
+    expect(plan.toDelete).toContain('arena/test/variant-merged');
+    expect(plan.toSkip).not.toContainEqual(
+      expect.objectContaining({ branch: 'arena/test/variant-merged' })
+    );
+
+    // Execute cleanup
+    const result = await executeRemoteCleanup({
+      repository: manager,
+      gitRoot,
+      plan,
+      logger: silentLogger
+    });
+
+    expect(result.deleted).toContain('arena/test/variant-merged');
+    expect(result.errors).toHaveLength(0);
+    expect(await remoteHasBranch(remoteDir, 'arena/test/variant-merged')).toBe(false);
+  }, 30_000);
+
+  it('skips arena branch when accept branch exists locally but is NOT merged', async () => {
+    const { gitRoot } = await createRemoteBackedRepo();
+    const manager = new GitRepositoryManager(new NodeCommandRunner(), silentLogger);
+
+    // Push an arena variant branch
+    await pushBranch(gitRoot, 'arena/test/variant-unmerged');
+
+    // Create accept branch locally only (not pushed to remote)
+    await execFileAsync('git', ['-C', gitRoot, 'branch', 'accept/test/variant-unmerged', 'arena/test/variant-unmerged']);
+
+    // Plan cleanup — should skip (accept branch not on remote and not merged)
+    const plan = await planRemoteCleanup({
+      repository: manager,
+      gitRoot,
+      arenaName: 'test',
+      branches: ['arena/test/variant-unmerged'],
+      logger: silentLogger
+    });
+
+    expect(plan.toSkip).toContainEqual(
+      expect.objectContaining({
+        branch: 'arena/test/variant-unmerged',
+        reason: 'accepted (accept branch not yet on remote)'
+      })
+    );
+    expect(plan.toDelete).not.toContain('arena/test/variant-unmerged');
+  }, 30_000);
+
   it('formatRemoteCleanupResult produces readable output for integration scenario', () => {
     const result = {
       deleted: ['arena/test/variant-a', 'arena/test/variant-b'],
