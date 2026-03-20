@@ -42,10 +42,17 @@
   },
   "keywords": [
     "cli",
-    "ink",
     "pty",
     "git-worktree",
-    "ai"
+    "ai",
+    "ai-agents",
+    "code-generation",
+    "developer-tools",
+    "copilot",
+    "llm",
+    "autonomous-agents",
+    "arena",
+    "evaluation"
   ],
   "author": "",
   "license": "MIT",
