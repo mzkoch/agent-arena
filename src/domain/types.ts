@@ -107,6 +107,7 @@ export interface AgentSnapshot {
   startedAt?: string | undefined;
   completedAt?: string | undefined;
   exitCode?: number | undefined;
+  completionReason?: string | undefined;
   error?: string | undefined;
   interactive: boolean;
 }

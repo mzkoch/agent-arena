@@ -114,6 +114,15 @@ The orchestrator is designed around PTYs rather than pipes so that interactive a
 
 The orchestrator emits full agent state updates and incremental output chunks. The same event model feeds both the local Ink TUI and the IPC server for headless monitoring.
 
+### 9. Structured diagnostics logging
+
+Each launch also produces arena-side diagnostics logs under `.arena/<name>/logs/`:
+
+- `session.jsonl` is an append-only JSONL stream where each line is a single event shaped like `{ "ts": "<ISO8601>", "event": "<name>", ...data }`
+- `<variant>.log` captures the raw PTY stream for that variant as timestamped chunks in the form `[<ISO8601>] <chunk>`
+
+The orchestrator writes lifecycle events for arena start, agent spawn/state transitions, idle checks and responses, process exits, completion/failure, model recovery, and the final `arena.summary`. `warn()` and `error()` calls are also forwarded into the structured session log so diagnostics remain available even when stderr output is noisy or ephemeral.
+
 ## Module Layout
 
 ```text

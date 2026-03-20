@@ -10,6 +10,8 @@ export * from './ipc/protocol';
 export * from './ipc/reconnecting-client';
 export * from './ipc/server';
 export * from './ipc/session-file';
+export * from './logging/arena-logger';
+export * from './logging/types';
 export * from './orchestrator/arena-orchestrator';
 export * from './orchestrator/pty';
 export * from './orchestrator/virtual-terminal';

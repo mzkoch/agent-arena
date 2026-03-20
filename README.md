@@ -60,6 +60,20 @@ arena launch --headless
 arena monitor
 ```
 
+### Diagnostics Logs
+
+Each arena launch writes diagnostics under `.arena/<name>/logs/`:
+
+- `session.jsonl` stores structured lifecycle events such as `arena.start`, `agent.spawn`, `agent.state`, `agent.exit`, `agent.complete`, `agent.fail`, and `arena.summary`
+- `<variant>.log` stores raw PTY output for each agent with an ISO-8601 timestamp prefix on every captured chunk
+
+Useful commands:
+
+```bash
+tail -f .arena/default/logs/alpha.log
+jq -c '.' .arena/default/logs/session.jsonl
+```
+
 ### 4. Evaluate and accept
 
 Check structured status:

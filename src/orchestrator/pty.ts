@@ -7,7 +7,7 @@ export interface PtyProcess {
   kill(): void;
   resize(cols: number, rows: number): void;
   onData(listener: (chunk: string) => void): { dispose(): void };
-  onExit(listener: (event: { exitCode: number }) => void): { dispose(): void };
+  onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void };
 }
 
 export interface PtySpawnOptions {
