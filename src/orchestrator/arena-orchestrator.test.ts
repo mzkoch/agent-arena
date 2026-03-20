@@ -11,7 +11,7 @@ class FakePty implements PtyProcess {
   public readonly writes: string[] = [];
   public pid = 101;
   private dataListeners: Array<(chunk: string) => void> = [];
-  private exitListeners: Array<(event: { exitCode: number }) => void> = [];
+  private exitListeners: Array<(event: { exitCode: number; signal?: number }) => void> = [];
 
   public write(data: string): void {
     this.writes.push(data);
@@ -26,7 +26,7 @@ class FakePty implements PtyProcess {
     return { dispose: () => undefined };
   }
 
-  public onExit(listener: (event: { exitCode: number }) => void): { dispose(): void } {
+  public onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void } {
     this.exitListeners.push(listener);
     return { dispose: () => undefined };
   }
@@ -37,9 +37,13 @@ class FakePty implements PtyProcess {
     }
   }
 
-  public emitExit(exitCode: number): void {
+  public emitExit(exitCode: number, signal?: number): void {
     for (const listener of this.exitListeners) {
-      listener({ exitCode });
+      if (signal === undefined) {
+        listener({ exitCode });
+      } else {
+        listener({ exitCode, signal });
+      }
     }
   }
 }
@@ -129,6 +133,158 @@ describe('ArenaOrchestrator', () => {
     fakePty.emitData('CONT\n');
     expect(orchestrator.getSnapshot().agents[0]?.status).toBe('running');
     vi.useRealTimers();
+  });
+
+  it('forwards arena lifecycle events and PTY output to the injected arena logger', async () => {
+    const fakePty = new FakePty();
+    const logEvent = vi.fn();
+    const logPty = vi.fn();
+    const arenaLogger = {
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+      logEvent,
+      logPty,
+      writeSummary() {},
+      close: vi.fn(() => Promise.resolve())
+    };
+
+    const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+      ptyFactory: () => fakePty,
+      processTerminator: () => Promise.resolve(),
+      arenaLogger
+    });
+
+    await orchestrator.startAll();
+    fakePty.emitData('working\nDONE\n');
+
+    await vi.waitFor(() => {
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+    });
+
+    expect(logPty).toHaveBeenCalledWith('alpha', 'working\nDONE\n');
+    expect(logEvent).toHaveBeenCalledWith('arena.start', {
+      variants: ['alpha'],
+      maxContinues: 5,
+      agentTimeoutMs: 10_000
+    });
+    expect(logEvent).toHaveBeenCalledWith(
+      'agent.spawn',
+      expect.objectContaining({
+        variant: 'alpha',
+        pid: 101,
+        command: 'fake',
+        model: 'gpt-5',
+        worktreePath: '/tmp/alpha'
+      })
+    );
+    expect(logEvent).toHaveBeenCalledWith('agent.state', {
+      variant: 'alpha',
+      from: 'pending',
+      to: 'running'
+    });
+    expect(logEvent).toHaveBeenCalledWith('agent.idle_response', {
+      variant: 'alpha',
+      markerMatched: 'done'
+    });
+    expect(logEvent).toHaveBeenCalledWith('agent.complete', {
+      variant: 'alpha',
+      reason: 'done_marker',
+      exitCode: 0
+    });
+    expect(logEvent).toHaveBeenCalledWith('agent.state', {
+      variant: 'alpha',
+      from: 'running',
+      to: 'completed'
+    });
+  });
+
+  it('logs idle checks, process exits, and max-check completion reasons', async () => {
+    vi.useFakeTimers();
+    const fakePty = new FakePty();
+    const logEvent = vi.fn();
+    const arenaLogger = {
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+      logEvent,
+      logPty() {},
+      writeSummary() {},
+      close: vi.fn(() => Promise.resolve())
+    };
+
+    const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+      ptyFactory: () => fakePty,
+      processTerminator: () => Promise.resolve(),
+      arenaLogger
+    });
+
+    await orchestrator.startAll();
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(50);
+
+    await vi.waitFor(() => {
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+    });
+
+    expect(logEvent).toHaveBeenCalledWith('agent.idle_check', {
+      variant: 'alpha',
+      checksPerformed: 1
+    });
+    expect(logEvent).toHaveBeenCalledWith('agent.idle_check', {
+      variant: 'alpha',
+      checksPerformed: 2
+    });
+    expect(logEvent).toHaveBeenCalledWith('agent.complete', {
+      variant: 'alpha',
+      reason: 'max_checks',
+      exitCode: 0
+    });
+    vi.useRealTimers();
+  });
+
+  it('logs exit metadata when a process exits normally', async () => {
+    const fakePty = new FakePty();
+    const logEvent = vi.fn();
+    const arenaLogger = {
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+      logEvent,
+      logPty() {},
+      writeSummary() {},
+      close: vi.fn(() => Promise.resolve())
+    };
+
+    const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+      ptyFactory: () => fakePty,
+      processTerminator: () => Promise.resolve(),
+      arenaLogger
+    });
+
+    await orchestrator.startAll();
+    fakePty.emitExit(0, 15);
+
+    await vi.waitFor(() => {
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+    });
+
+    expect(logEvent).toHaveBeenCalledWith(
+      'agent.exit',
+      expect.objectContaining({
+        variant: 'alpha',
+        exitCode: 0,
+        signal: 15
+      })
+    );
+    expect(logEvent).toHaveBeenCalledWith('agent.complete', {
+      variant: 'alpha',
+      reason: 'process_exit',
+      exitCode: 0
+    });
   });
 
   it('attempts model recovery on early failure with a close match', async () => {

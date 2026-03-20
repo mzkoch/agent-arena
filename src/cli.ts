@@ -28,6 +28,8 @@ import type { ArenaSnapshot } from './domain/types';
 import { GitRepositoryManager } from './git/repository';
 import { NodeCommandRunner } from './git/command-runner';
 import { planRemoteCleanup, executeRemoteCleanup, formatRemoteCleanupResult } from './git/remote-cleanup';
+import { FileArenaLogger } from './logging/arena-logger';
+import type { ArenaSummary } from './logging/types';
 
 const program = new Command();
 
@@ -74,6 +76,18 @@ const registerCleanup = (
     process.off('SIGTERM', handler);
   };
 };
+
+const buildArenaSummary = (snapshot: ArenaSnapshot): ArenaSummary => ({
+  agents: snapshot.agents.map((agent) => ({
+    variant: agent.name,
+    status: agent.status,
+    durationMs: agent.elapsedMs,
+    exitCode: agent.exitCode,
+    completionReason: agent.completionReason
+  })),
+  errors: [],
+  warnings: []
+});
 
 program
   .name('arena')
@@ -122,8 +136,9 @@ program
   .option('--headless', 'Run without local TUI')
   .description('Create worktrees and start agents')
   .action(async (name: string | undefined, options: { headless?: boolean }) => {
-    const logger = createLogger(Boolean(program.opts().verbose));
-    const context = await loadRuntimeContext(name, logger);
+    const consoleLogger = createLogger(Boolean(program.opts().verbose));
+    const context = await loadRuntimeContext(name, consoleLogger);
+    const logger = new FileArenaLogger(context.paths.logDir, consoleLogger);
 
     await setupWorkspacesForLaunch(context);
 
@@ -131,7 +146,8 @@ program
       context.config,
       context.workspaces,
       context.paths.gitRoot,
-      logger
+      logger,
+      { arenaLogger: logger }
     );
 
     const server = new ArenaIpcServer({
@@ -176,14 +192,21 @@ program
     await orchestrator.startAll();
 
     let cleaned = false;
-    const cleanup = async (): Promise<void> => {
+    const cleanup = async (summarySnapshot?: ArenaSnapshot): Promise<void> => {
       if (cleaned) {
         return;
       }
       cleaned = true;
-      await orchestrator.close();
-      await server.close();
-      await removeSessionFile(context.paths.sessionFilePath);
+      // Capture snapshot before close so agent states reflect true terminal outcomes
+      const snapshot = summarySnapshot ?? orchestrator.getSnapshot(Boolean(options.headless));
+      try {
+        await orchestrator.close();
+        await server.close();
+        await removeSessionFile(context.paths.sessionFilePath);
+      } finally {
+        logger.writeSummary(buildArenaSummary(snapshot));
+        await logger.close();
+      }
     };
 
     const unregisterCleanup = registerCleanup(cleanup);
@@ -194,7 +217,7 @@ program
       );
       const snapshot = await waitForCompletion(orchestrator, true);
       unregisterCleanup();
-      await cleanup();
+      await cleanup(snapshot);
       process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
       return;
     }
