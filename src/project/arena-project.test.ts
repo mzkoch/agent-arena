@@ -192,7 +192,7 @@ describe('ArenaProject', () => {
 
     // Ensure there is no .gitignore yet
     const gitignorePath = path.join(gitRoot, '.gitignore');
-    try { await access(gitignorePath); expect.fail('Expected no .gitignore'); } catch { /* expected */ }
+    await expect(access(gitignorePath)).rejects.toHaveProperty('code', 'ENOENT');
 
     await project.ensureGitignore();
     const content = await readFile(gitignorePath, 'utf8');
