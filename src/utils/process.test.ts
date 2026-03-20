@@ -75,8 +75,11 @@ describe('terminateProcessTree', () => {
       .mockImplementationOnce(() => true)
       .mockImplementationOnce(() => { throw epermError; });
 
-    const termination = terminateProcessTree(666);
+    // Capture the promise immediately so the rejection is handled
+    const termination = terminateProcessTree(666).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(300);
-    await expect(termination).rejects.toThrow('EPERM');
+    const result = await termination;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toBe('EPERM');
   });
 });
