@@ -19,8 +19,9 @@ const defaultExecutor: CommandExecutor = async (command, args, options) => {
  * Handles multi-line output where choices may wrap across lines.
  */
 export const parseChoicesFlag = (output: string): string[] => {
-  // Match --model followed by (choices: ...) potentially spanning multiple lines
-  const pattern = /--model\b[^(]*\(choices:\s*([\s\S]*?)\)/i;
+  // Match --model followed by (choices: ...) potentially spanning multiple lines.
+  // Use [^(\s]+ and \s* alternation to avoid polynomial backtracking (CodeQL js/polynomial-redos).
+  const pattern = /--model\b(?:[^(\s]|\s)*\(choices:\s*([\s\S]*?)\)/i;
   const match = output.match(pattern);
   if (!match?.[1]) {
     return [];
