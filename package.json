@@ -1,6 +1,6 @@
 {
   "name": "@mzkoch/agent-arena",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Cross-platform CLI for running competing autonomous coding agents in isolated git worktrees.",
   "repository": {
