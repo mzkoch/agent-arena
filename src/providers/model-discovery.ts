@@ -19,14 +19,25 @@ const defaultExecutor: CommandExecutor = async (command, args, options) => {
  * Handles multi-line output where choices may wrap across lines.
  */
 export const parseChoicesFlag = (output: string): string[] => {
-  // Match --model followed by (choices: ...) potentially spanning multiple lines
-  const pattern = /--model\b[^(]*\(choices:\s*([\s\S]*?)\)/i;
-  const match = output.match(pattern);
-  if (!match?.[1]) {
+  // Use indexOf to locate the choices block, avoiding regex backtracking entirely.
+  const modelIdx = output.search(/--model\b/i);
+  if (modelIdx === -1) {
     return [];
   }
 
-  const choicesBlock = match[1];
+  const afterModel = output.substring(modelIdx);
+  const choicesIdx = afterModel.search(/\(choices:/i);
+  if (choicesIdx === -1) {
+    return [];
+  }
+
+  const afterChoicesLabel = afterModel.substring(choicesIdx + '(choices:'.length);
+  const closingIdx = afterChoicesLabel.indexOf(')');
+  if (closingIdx === -1) {
+    return [];
+  }
+
+  const choicesBlock = afterChoicesLabel.substring(0, closingIdx);
   const models: string[] = [];
   const quotePattern = /"([^"]+)"/g;
   let quoteMatch: RegExpExecArray | null;
