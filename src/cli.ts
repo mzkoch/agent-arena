@@ -197,12 +197,13 @@ program
         return;
       }
       cleaned = true;
+      // Capture snapshot before close so agent states reflect true terminal outcomes
+      const snapshot = summarySnapshot ?? orchestrator.getSnapshot(Boolean(options.headless));
       try {
         await orchestrator.close();
         await server.close();
         await removeSessionFile(context.paths.sessionFilePath);
       } finally {
-        const snapshot = summarySnapshot ?? orchestrator.getSnapshot(Boolean(options.headless));
         logger.writeSummary(buildArenaSummary(snapshot));
         await logger.close();
       }

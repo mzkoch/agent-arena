@@ -52,11 +52,17 @@ export class FileArenaLogger implements ArenaLogger {
       return;
     }
 
-    const line = `${JSON.stringify({
-      ts: new Date().toISOString(),
-      event,
-      ...data
-    })}\n`;
+    let line: string;
+    try {
+      line = `${JSON.stringify({
+        ts: new Date().toISOString(),
+        event,
+        ...data
+      })}\n`;
+    } catch (error) {
+      this.reportFailure('Failed to serialize log event', event, error);
+      return;
+    }
     this.trackWrite(this.appendToFile(this.getSessionHandle.bind(this), line, this.sessionLogPath));
   }
 
@@ -185,6 +191,10 @@ export class FileArenaLogger implements ArenaLogger {
     if (!context || Object.keys(context).length === 0) {
       return message;
     }
-    return `${message} ${JSON.stringify(context)}`;
+    try {
+      return `${message} ${JSON.stringify(context)}`;
+    } catch {
+      return message;
+    }
   }
 }

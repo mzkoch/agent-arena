@@ -382,6 +382,40 @@ describe('FileArenaLogger', () => {
     });
   });
 
+  it('handles JSON serialization failures in logEvent gracefully', async () => {
+    const consoleLogger = createConsoleLogger();
+    const logDir = path.join(tempDir, 'serial-fail');
+    const logger = new FileArenaLogger(logDir, consoleLogger.logger);
+
+    // Create a circular reference that JSON.stringify cannot handle
+    const circular: Record<string, unknown> = { key: 'value' };
+    circular['self'] = circular;
+
+    expect(() => {
+      logger.logEvent('agent.spawn', circular);
+    }).not.toThrow();
+
+    // The error should have been reported via the fallback logger
+    await logger.close();
+    expect(consoleLogger.error).toHaveBeenCalled();
+  });
+
+  it('handles JSON serialization failures in formatSummaryMessage gracefully', async () => {
+    const consoleLogger = createConsoleLogger();
+    const logDir = path.join(tempDir, 'summary-serial-fail');
+    const logger = new FileArenaLogger(logDir, consoleLogger.logger);
+
+    // Create a circular reference for the context
+    const circular: Record<string, unknown> = { variant: 'test' };
+    circular['self'] = circular;
+
+    expect(() => {
+      logger.warn('test warning', circular);
+    }).not.toThrow();
+
+    await logger.close();
+  });
+
   it('swallows file system failures without throwing', async () => {
     const invalidLogDir = path.join(tempDir, 'not-a-directory');
     await writeFile(invalidLogDir, 'occupied');

@@ -331,10 +331,12 @@ export class ArenaOrchestrator extends EventEmitter<{
         ? 'continue'
         : null;
 
-    this.dependencies.arenaLogger?.logEvent('agent.idle_response', {
-      variant: agentName,
-      markerMatched
-    });
+    if (markerMatched !== null) {
+      this.dependencies.arenaLogger?.logEvent('agent.idle_response', {
+        variant: agentName,
+        markerMatched
+      });
+    }
 
     // Capture vterm reference so the delta always matches the terminal that processed the write
     const vterm = agent.vterm;
