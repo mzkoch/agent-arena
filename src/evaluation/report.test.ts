@@ -78,6 +78,73 @@ describe('evaluation report', () => {
     expect(scored.notes).toContain('No changes detected relative to main');
   });
 
+  it('notes zero-diff with commits ahead as net-zero diff', () => {
+    const scored = scoreVariant({
+      name: 'zero-net',
+      worktreePath: '/tmp/zero-net',
+      baseRef: 'main',
+      hasChanges: false,
+      commitCount: 3,
+      changedFileCount: 0,
+      addedLineCount: 0,
+      deletedLineCount: 0,
+      newTestFileCount: 0,
+      fileCount: 5,
+      testFileCount: 1,
+      hasReadme: true,
+      hasDesignDoc: true,
+      readmeChanged: false,
+      designDocChanged: false
+    });
+
+    expect(scored.score).toBe(0);
+    expect(scored.notes).toContain('Branch has commits ahead of the baseline, but its net diff is zero');
+  });
+
+  it('awards bonus for designDocChanged', () => {
+    const withDesignDoc = scoreVariant({
+      name: 'with-design',
+      worktreePath: '/tmp/with-design',
+      baseRef: 'main',
+      hasChanges: true,
+      commitCount: 1,
+      changedFileCount: 1,
+      addedLineCount: 10,
+      deletedLineCount: 0,
+      newTestFileCount: 0,
+      fileCount: 5,
+      testFileCount: 0,
+      hasReadme: false,
+      hasDesignDoc: true,
+      readmeChanged: false,
+      designDocChanged: true
+    });
+
+    const withoutDesignDoc = scoreVariant({
+      name: 'no-design',
+      worktreePath: '/tmp/no-design',
+      baseRef: 'main',
+      hasChanges: true,
+      commitCount: 1,
+      changedFileCount: 1,
+      addedLineCount: 10,
+      deletedLineCount: 0,
+      newTestFileCount: 0,
+      fileCount: 5,
+      testFileCount: 0,
+      hasReadme: false,
+      hasDesignDoc: false,
+      readmeChanged: false,
+      designDocChanged: false
+    });
+
+    expect(withDesignDoc.score).toBeGreaterThan(withoutDesignDoc.score);
+    expect(withDesignDoc.notes).toContain('DESIGN.md changed');
+    expect(withoutDesignDoc.notes).toContain('DESIGN.md unchanged');
+    expect(withoutDesignDoc.notes).toContain('README missing');
+    expect(withoutDesignDoc.notes).toContain('No new test files added');
+  });
+
   it('evaluates workspaces and renders diff-aware markdown', async () => {
     const root = await createGitRepo();
     const worktreeRoot = path.join(root, '.arena', 'worktrees');

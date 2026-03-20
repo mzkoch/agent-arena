@@ -16,4 +16,22 @@ describe('OutputBuffer', () => {
     buffer.append('a\nb\nc\n');
     expect(buffer.getLines()).toEqual(['b', 'c']);
   });
+
+  it('reports line count including trailing partial line', () => {
+    const buffer = new OutputBuffer(10);
+    buffer.append('line1\nline2\npartial');
+    expect(buffer.getLineCount()).toBe(3);
+  });
+
+  it('reports line count with no trailing partial', () => {
+    const buffer = new OutputBuffer(10);
+    buffer.append('line1\nline2\n');
+    expect(buffer.getLineCount()).toBe(2);
+  });
+
+  it('returns ansi text with newlines preserved', () => {
+    const buffer = new OutputBuffer(10);
+    buffer.append('a\nb\nc\n');
+    expect(buffer.getAnsiText()).toBe('a\nb\nc');
+  });
 });

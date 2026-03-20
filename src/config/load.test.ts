@@ -371,3 +371,64 @@ describe('loadArenaConfig model validation', () => {
     expect(config.variants[0]?.model).toBe('any-model');
   });
 });
+
+describe('schema validation', () => {
+  it('rejects promptDelivery=flag without promptFlag', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-schema-'));
+    const configPath = path.join(tempDir, 'arena.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        providers: {
+          'test-provider': {
+            command: 'test-cmd',
+            promptDelivery: 'flag',
+            exitCommand: '/quit'
+            // missing promptFlag
+          }
+        },
+        variants: [
+          {
+            name: 'v1',
+            provider: 'test-provider',
+            model: 'test-model',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Test'
+          }
+        ]
+      })
+    );
+
+    await expect(loadArenaConfig(configPath)).rejects.toThrow(/promptFlag/);
+  });
+
+  it('accepts promptDelivery=flag with promptFlag', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'arena-schema-'));
+    const configPath = path.join(tempDir, 'arena.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        providers: {
+          'test-provider': {
+            command: 'test-cmd',
+            promptDelivery: 'flag',
+            promptFlag: '--prompt',
+            exitCommand: '/quit'
+          }
+        },
+        variants: [
+          {
+            name: 'v1',
+            provider: 'test-provider',
+            model: 'test-model',
+            techStack: 'TypeScript',
+            designPhilosophy: 'Test'
+          }
+        ]
+      })
+    );
+
+    const config = await loadArenaConfig(configPath);
+    expect(config.providers['test-provider']?.promptFlag).toBe('--prompt');
+  });
+});

@@ -23,4 +23,63 @@ describe('terminateProcessTree', () => {
     expect(killSpy).toHaveBeenNthCalledWith(1, -321, 'SIGTERM');
     expect(killSpy).toHaveBeenNthCalledWith(2, 321, 'SIGTERM');
   });
+
+  it('ignores ESRCH on first kill (process group already gone)', async () => {
+    if (process.platform === 'win32') return;
+
+    vi.useFakeTimers();
+    const esrchError = Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+    const killSpy = vi.spyOn(process, 'kill')
+      .mockImplementationOnce(() => { throw esrchError; })
+      .mockImplementation(() => true);
+
+    const termination = terminateProcessTree(999);
+    await vi.advanceTimersByTimeAsync(300);
+    await termination;
+
+    expect(killSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores ESRCH on second kill (process already gone)', async () => {
+    if (process.platform === 'win32') return;
+
+    vi.useFakeTimers();
+    const esrchError = Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+    const killSpy = vi.spyOn(process, 'kill')
+      .mockImplementationOnce(() => true)
+      .mockImplementationOnce(() => { throw esrchError; });
+
+    const termination = terminateProcessTree(888);
+    await vi.advanceTimersByTimeAsync(300);
+    await termination;
+
+    expect(killSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('rethrows non-ESRCH errors from first kill', async () => {
+    if (process.platform === 'win32') return;
+
+    vi.useFakeTimers();
+    const epermError = Object.assign(new Error('EPERM'), { code: 'EPERM' });
+    vi.spyOn(process, 'kill').mockImplementationOnce(() => { throw epermError; });
+
+    await expect(terminateProcessTree(777)).rejects.toThrow('EPERM');
+  });
+
+  it('rethrows non-ESRCH errors from second kill', async () => {
+    if (process.platform === 'win32') return;
+
+    vi.useFakeTimers();
+    const epermError = Object.assign(new Error('EPERM'), { code: 'EPERM' });
+    vi.spyOn(process, 'kill')
+      .mockImplementationOnce(() => true)
+      .mockImplementationOnce(() => { throw epermError; });
+
+    // Capture the promise immediately so the rejection is handled
+    const termination = terminateProcessTree(666).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(300);
+    const result = await termination;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toBe('EPERM');
+  });
 });
