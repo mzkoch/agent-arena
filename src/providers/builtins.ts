@@ -8,6 +8,9 @@ export const DEFAULT_COMPLETION_PROTOCOL = {
   continueMarker: 'ARENA_CONTINUING'
 } as const;
 
+const MODEL_DISCOVERY_PROMPT =
+  'list the names of the models available to you. Output ONLY the model names, one per line, nothing else.';
+
 export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
   'copilot-cli': {
     command: 'copilot',
@@ -25,8 +28,8 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     },
     modelDiscovery: {
       command: 'copilot',
-      args: ['--help'],
-      parseStrategy: 'choices-flag'
+      args: ['-p', MODEL_DISCOVERY_PROMPT],
+      parseStrategy: 'prompt-models'
     }
   },
   'claude-code': {
@@ -41,6 +44,11 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
       configFile: '~/.claude.json',
       jsonKey: 'projects',
       nestedKey: 'hasTrustDialogAccepted'
+    },
+    modelDiscovery: {
+      command: 'claude',
+      args: ['-p', MODEL_DISCOVERY_PROMPT],
+      parseStrategy: 'prompt-models'
     }
   }
 };

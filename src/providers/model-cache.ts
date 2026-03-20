@@ -4,7 +4,7 @@ import { readJsonFile, writeJsonFile } from '../utils/files';
 import { withFileLock } from './trusted-folders';
 import { discoverModels, type CommandExecutor } from './model-discovery';
 
-const DEFAULT_TTL_MS = 3_600_000; // 1 hour
+const DEFAULT_TTL_MS = 86_400_000; // 24 hours
 const MODEL_CACHE_FILENAME = '.model-cache.json';
 
 export interface ModelCacheEntry {
