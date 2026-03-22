@@ -73,11 +73,31 @@ export const variantConfigSchema = z.object({
   branch: z.string().min(1).optional()
 });
 
+const completionVerificationCommandSchema = z.object({
+  command: z.string().min(1),
+  args: z.array(z.string()),
+  timeoutMs: z.number().int().positive().default(300_000)
+});
+
+const completionVerificationSchema = z.object({
+  enabled: z.boolean().default(true),
+  requireCommit: z.boolean().default(true),
+  requireCleanWorktree: z.boolean().default(true),
+  command: completionVerificationCommandSchema.optional()
+});
+
+const defaultCompletionVerification = {
+  enabled: true,
+  requireCommit: true,
+  requireCleanWorktree: true
+} as const;
+
 export const arenaConfigSchema = z
   .object({
     repoName: z.string().min(1).optional(),
     maxContinues: z.number().int().positive().default(50),
     agentTimeoutMs: z.number().int().positive().default(3_600_000),
+    completionVerification: completionVerificationSchema.default(defaultCompletionVerification),
     providers: z.record(z.string(), providerConfigSchema).default({}),
     variants: z.array(variantConfigSchema).min(1, 'At least one variant is required.')
   })
