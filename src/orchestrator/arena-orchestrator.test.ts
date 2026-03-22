@@ -83,9 +83,7 @@ const config: ArenaConfig = {
       completionProtocol: {
         idleTimeoutMs: 25,
         maxChecks: 2,
-        responseTimeoutMs: 25,
-        doneMarker: 'DONE',
-        continueMarker: 'CONT'
+        responseTimeoutMs: 25
       }
     }
   },
@@ -121,7 +119,7 @@ describe('ArenaOrchestrator', () => {
     await orchestrator.startAll();
     expect(fakePty.writes[0]).toMatch(/Read \.arena\/REQUIREMENTS\.md/);
 
-    fakePty.emitData('working\nDONE\n');
+    fakePty.emitData('working\n<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
     // completeAgent is async — allow the termination promise to resolve
     await vi.waitFor(() => {
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
@@ -145,7 +143,7 @@ describe('ArenaOrchestrator', () => {
     await vi.advanceTimersByTimeAsync(30);
     expect(fakePty.writes.some((write) => write.includes('Status check'))).toBe(true);
 
-    fakePty.emitData('CONT\n');
+    fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
     expect(orchestrator.getSnapshot().agents[0]?.status).toBe('running');
     vi.useRealTimers();
   });
@@ -172,13 +170,13 @@ describe('ArenaOrchestrator', () => {
     });
 
     await orchestrator.startAll();
-    fakePty.emitData('working\nDONE\n');
+    fakePty.emitData('working\n<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
     await vi.waitFor(() => {
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
     });
 
-    expect(logPty).toHaveBeenCalledWith('alpha', 'working\nDONE\n');
+    expect(logPty).toHaveBeenCalledWith('alpha', 'working\n<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
     expect(logEvent).toHaveBeenCalledWith('arena.start', {
       variants: ['alpha'],
       maxContinues: 5,
@@ -201,8 +199,7 @@ describe('ArenaOrchestrator', () => {
     });
     expect(logEvent).toHaveBeenCalledWith('agent.idle_response', {
       variant: 'alpha',
-      markerMatched: 'done',
-      signalSource: 'legacy'
+      markerMatched: 'done'
     });
     expect(logEvent).toHaveBeenCalledWith('agent.complete', {
       variant: 'alpha',
@@ -503,7 +500,7 @@ describe('ArenaOrchestrator', () => {
       await orchestrator.startAll();
 
       // Complete via done marker
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
@@ -525,7 +522,7 @@ describe('ArenaOrchestrator', () => {
 
       await orchestrator.startAll();
 
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
@@ -548,13 +545,13 @@ describe('ArenaOrchestrator', () => {
 
       await orchestrator.startAll();
 
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
 
       // Continue marker after completion must not revert to running
-      fakePty.emitData('CONT\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
       await vi.advanceTimersByTimeAsync(200);
 
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
@@ -628,14 +625,14 @@ describe('ArenaOrchestrator', () => {
       await orchestrator.startAll();
 
       // Complete the agent
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
 
       // Bombard with data and timer advances
       fakePty.emitData('extra data\n');
-      fakePty.emitData('CONT\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
       await vi.advanceTimersByTimeAsync(500);
 
       // Find the index of the first 'completed' status
@@ -662,7 +659,7 @@ describe('ArenaOrchestrator', () => {
       await orchestrator.startAll();
 
       // Complete via done marker
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
@@ -687,7 +684,7 @@ describe('ArenaOrchestrator', () => {
       await orchestrator.startAll();
 
       // Complete the agent
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
@@ -847,7 +844,7 @@ describe('ArenaOrchestrator', () => {
       vi.useRealTimers();
     });
 
-    it('envelope takes priority over legacy marker', async () => {
+    it('envelope continue signal keeps agent running', async () => {
       const fakePty = new FakePty();
       const logEvent = vi.fn();
       const arenaLogger = {
@@ -862,14 +859,11 @@ describe('ArenaOrchestrator', () => {
       });
 
       await orchestrator.startAll();
-      // Send both legacy done and envelope continue — envelope should win
-      fakePty.emitData('DONE <<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
 
-      // Should NOT complete — envelope continue takes priority
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('running');
       expect(logEvent).toHaveBeenCalledWith('agent.idle_response', expect.objectContaining({
-        markerMatched: 'continue',
-        signalSource: 'envelope'
+        markerMatched: 'continue'
       }));
     });
   });
@@ -897,7 +891,7 @@ describe('ArenaOrchestrator', () => {
       });
 
       await orchestrator.startAll();
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
       // Should transition through verifying → completed
       await vi.waitFor(() => {
@@ -922,7 +916,7 @@ describe('ArenaOrchestrator', () => {
       });
 
       await orchestrator.startAll();
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
       // Allow async verification to complete
       await vi.advanceTimersByTimeAsync(0);
@@ -953,7 +947,7 @@ describe('ArenaOrchestrator', () => {
       });
 
       await orchestrator.startAll();
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
       // Wait for verifying state
       await vi.waitFor(() => {
@@ -990,7 +984,7 @@ describe('ArenaOrchestrator', () => {
       });
 
       await orchestrator.startAll();
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
@@ -1016,7 +1010,7 @@ describe('ArenaOrchestrator', () => {
       });
 
       await orchestrator.startAll();
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
@@ -1042,7 +1036,7 @@ describe('ArenaOrchestrator', () => {
       });
 
       await orchestrator.startAll();
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
@@ -1053,7 +1047,7 @@ describe('ArenaOrchestrator', () => {
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
 
       // Another done signal should be ignored
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
 
       resolveVerification?.();
@@ -1085,7 +1079,7 @@ describe('ArenaOrchestrator', () => {
       });
 
       await orchestrator.startAll();
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');

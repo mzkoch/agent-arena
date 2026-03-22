@@ -333,15 +333,13 @@ export class ArenaOrchestrator extends EventEmitter<{
     }
 
     // Signal detection from plain text — synchronous, independent of xterm
-    const provider = this.registry.get(agent.workspace.variant.provider);
     const plainChunk = stripAnsi(chunk);
-    const detection = detectSignal(plainChunk, provider.completionProtocol);
+    const signal = detectSignal(plainChunk);
 
-    if (detection.match !== null) {
+    if (signal !== null) {
       this.dependencies.arenaLogger?.logEvent('agent.idle_response', {
         variant: agentName,
-        markerMatched: detection.match,
-        signalSource: detection.source
+        markerMatched: signal
       });
     }
 
@@ -356,12 +354,12 @@ export class ArenaOrchestrator extends EventEmitter<{
       });
     });
 
-    if (detection.match === 'done') {
+    if (signal === 'done') {
       void this.handleDoneSignal(agentName);
       return;
     }
 
-    if (detection.match === 'continue') {
+    if (signal === 'continue') {
       agent.checksPerformed = 0;
       if (agent.status !== 'running') {
         this.setStatus(agent, 'running');
@@ -392,7 +390,7 @@ export class ArenaOrchestrator extends EventEmitter<{
       checksPerformed: agent.checksPerformed + 1
     });
     this.setStatus(agent, 'idle');
-    agent.process.write(`${buildStatusCheckPrompt(provider.completionProtocol)}\r`);
+    agent.process.write(`${buildStatusCheckPrompt()}\r`);
     agent.responseTimer = setTimeout(() => {
       if (!isTerminalStatus(agent.status)) {
         agent.checksPerformed += 1;

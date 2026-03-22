@@ -3,17 +3,13 @@ import { z } from 'zod';
 const defaultCompletionProtocol = {
   idleTimeoutMs: 30_000,
   maxChecks: 3,
-  responseTimeoutMs: 60_000,
-  doneMarker: 'ARENA_DONE',
-  continueMarker: 'ARENA_CONTINUING'
+  responseTimeoutMs: 60_000
 } as const;
 
 const completionProtocolSchema = z.object({
   idleTimeoutMs: z.number().int().positive().default(30_000),
   maxChecks: z.number().int().positive().default(3),
-  responseTimeoutMs: z.number().int().positive().default(60_000),
-  doneMarker: z.string().min(1).default('ARENA_DONE'),
-  continueMarker: z.string().min(1).default('ARENA_CONTINUING')
+  responseTimeoutMs: z.number().int().positive().default(60_000)
 });
 
 const flatArrayTrustedFoldersSchema = z.object({

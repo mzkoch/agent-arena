@@ -1,4 +1,5 @@
-import type { CompletionProtocol, VariantConfig } from '../domain/types';
+import type { VariantConfig } from '../domain/types';
+import { formatSignalEnvelope } from '../orchestrator/signal-protocol';
 
 const deliverableChecklist = [
   'Complete implementation of all requirements',
@@ -8,9 +9,12 @@ const deliverableChecklist = [
 ];
 
 export const buildArenaInstructions = (
-  variant: VariantConfig,
-  protocol: CompletionProtocol
-): string => `# Arena Instructions
+  variant: VariantConfig
+): string => {
+  const doneExample = formatSignalEnvelope({ status: 'done' });
+  const continueExample = formatSignalEnvelope({ status: 'continue' });
+
+  return `# Arena Instructions
 
 ## Your Design Assignment
 
@@ -38,14 +42,20 @@ ${deliverableChecklist.map((item, index) => `${index + 1}. ${item}`).join('\n')}
 ### Completion Protocol
 
 When complete, output:
-\`${protocol.doneMarker}\`
+\`${doneExample}\`
 
 If still working, output:
-\`${protocol.continueMarker}\`
+\`${continueExample}\`
+
+The orchestrator verifies your work before accepting completion and may send feedback if verification fails.
 `;
+};
 
 export const buildLaunchPrompt = (): string =>
   'Read .arena/REQUIREMENTS.md and .arena/ARENA-INSTRUCTIONS.md in your working directory, then follow the instructions to build the complete solution. Begin now.';
 
-export const buildStatusCheckPrompt = (protocol: CompletionProtocol): string =>
-  `Status check: if you have completed every deliverable, reply with ${protocol.doneMarker}. Otherwise reply with ${protocol.continueMarker}.`;
+export const buildStatusCheckPrompt = (): string => {
+  const doneExample = formatSignalEnvelope({ status: 'done' });
+  const continueExample = formatSignalEnvelope({ status: 'continue' });
+  return `Status check: if you have completed every deliverable, reply with ${doneExample}. Otherwise reply with ${continueExample}.`;
+};

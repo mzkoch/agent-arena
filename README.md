@@ -274,9 +274,7 @@ Custom providers can override built-ins or define new ones:
       "completionProtocol": {
         "idleTimeoutMs": 30000,
         "maxChecks": 3,
-        "responseTimeoutMs": 60000,
-        "doneMarker": "ARENA_DONE",
-        "continueMarker": "ARENA_CONTINUING"
+        "responseTimeoutMs": 60000
       },
       "trustedFolders": {
         "strategy": "flat-array",

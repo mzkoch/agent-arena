@@ -210,14 +210,9 @@ Completion signals use a structured envelope format to prevent false positives f
 
 The `<<<ARENA_SIGNAL:` prefix is virtually impossible to appear in normal agent output. The JSON payload is validated with Zod.
 
-### Two-Layer Detection Strategy
+### Envelope-Only Detection
 
-Signal detection in `src/orchestrator/signal-detector.ts` uses two layers:
-
-1. **Envelope detection** (preferred): Parses the `<<<ARENA_SIGNAL:...>>>` envelope format from plain text. If found, the envelope result takes priority.
-2. **Legacy marker scanning** (fallback): Falls back to `string.includes()` scanning for `doneMarker` and `continueMarker` strings, preserving backward compatibility with agents that don't emit envelopes.
-
-Envelope detection always takes priority when both formats are present in the same chunk.
+Signal detection in `src/orchestrator/signal-detector.ts` parses the `<<<ARENA_SIGNAL:...>>>` envelope format from plain text. This is the sole completion signal mechanism — there is no fallback to raw string scanning, which eliminates false-positive completion from marker strings appearing in agent reasoning output.
 
 ### Orchestrator → Agent Feedback
 
@@ -236,16 +231,14 @@ Each provider owns a `completionProtocol`:
 - `idleTimeoutMs`
 - `responseTimeoutMs`
 - `maxChecks`
-- `doneMarker`
-- `continueMarker`
 
 Flow:
 
 1. Agent starts in `running`
 2. If no output arrives within `idleTimeoutMs`, the orchestrator marks it `idle`
 3. The orchestrator writes a status-check prompt into the PTY
-4. If output contains a done signal (envelope or legacy marker), verification begins (see below)
-5. If output contains a continue signal, the agent returns to `running`
+4. If output contains a done envelope signal, verification begins (see below)
+5. If output contains a continue envelope signal, the agent returns to `running`
 6. If the agent never responds and `maxChecks` is reached, it is treated as completed
 
 ## Completion Verification

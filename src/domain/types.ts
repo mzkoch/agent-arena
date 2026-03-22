@@ -32,8 +32,6 @@ export interface CompletionProtocol {
   idleTimeoutMs: number;
   maxChecks: number;
   responseTimeoutMs: number;
-  doneMarker: string;
-  continueMarker: string;
 }
 
 export interface FlatArrayTrustedFoldersConfig {
