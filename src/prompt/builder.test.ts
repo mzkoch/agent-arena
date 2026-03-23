@@ -16,7 +16,7 @@ describe('prompt builder', () => {
     expect(instructions).toContain('Composable UI');
     expect(instructions).toContain('<<<ARENA_SIGNAL:{"status":"done"}>>>');
     expect(instructions).toContain('<<<ARENA_SIGNAL:{"status":"continue"}>>>');
-    expect(instructions).toContain('orchestrator verifies your work');
+    expect(instructions).toContain('orchestrator may verify your work');
   });
 
   it('does not contain legacy marker references', () => {

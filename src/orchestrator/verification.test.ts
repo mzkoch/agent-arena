@@ -116,6 +116,18 @@ describe('verifyWorkspaceCompletion', () => {
       const result = await verifyWorkspaceCompletion('/worktree', config, gitManager, commandRunner);
       expect(result.passed).toBe(true);
     });
+
+    it('treats git status failure as dirty (fail closed)', async () => {
+      const gitManager = createMockGitOps();
+      const commandRunner = createMockCommandRunner([
+        // git status --porcelain fails (non-zero exit)
+        { stdout: '', stderr: 'fatal: not a git repository', exitCode: 128, timedOut: false }
+      ]);
+
+      const result = await verifyWorkspaceCompletion('/worktree', defaultConfig, gitManager, commandRunner);
+      expect(result.passed).toBe(false);
+      expect(result.issues).toContain('Uncommitted changes detected. Commit or stash all changes.');
+    });
   });
 
   describe('validation command', () => {

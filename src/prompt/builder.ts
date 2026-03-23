@@ -47,7 +47,7 @@ When complete, output:
 If still working, output:
 \`${continueExample}\`
 
-The orchestrator verifies your work before accepting completion and may send feedback if verification fails.
+The orchestrator may verify your work before accepting completion and may send feedback if verification fails.
 `;
 };
 

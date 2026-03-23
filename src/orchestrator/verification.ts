@@ -104,5 +104,8 @@ async function checkUncommittedChanges(
   commandRunner: CommandRunner
 ): Promise<boolean> {
   const result = await commandRunner.run('git', ['-C', worktreePath, 'status', '--porcelain']);
-  return result.exitCode === 0 && result.stdout.trim().length > 0;
+  if (result.exitCode !== 0) {
+    return true; // Treat git failure as dirty — fail closed
+  }
+  return result.stdout.trim().length > 0;
 }

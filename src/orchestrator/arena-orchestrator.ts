@@ -447,12 +447,12 @@ export class ArenaOrchestrator extends EventEmitter<{
           baseRef: result.baseRef,
           commitCount: result.commitCount
         });
-        void this.completeAgent(agentName, 0, 'verified');
-        // Send exit command after acceptance
+        // Send exit command before completing (completeAgent kills the process tree)
         const provider = this.registry.get(agent.workspace.variant.provider);
         if (agent.process) {
           agent.process.write(`\r${provider.exitCommand}\r`);
         }
+        void this.completeAgent(agentName, 0, 'verified');
       } else {
         this.dependencies.arenaLogger?.logEvent('agent.verification_failed', {
           variant: agentName,
