@@ -6,6 +6,7 @@ export type AgentStatus =
   | 'pending'
   | 'running'
   | 'idle'
+  | 'verifying'
   | 'completed'
   | 'failed'
   | 'killed';
@@ -14,12 +15,23 @@ export type AgentStatus =
 export const isTerminalStatus = (status: AgentStatus): boolean =>
   status === 'completed' || status === 'failed' || status === 'killed';
 
+export interface CompletionVerificationCommand {
+  command: string;
+  args: string[];
+  timeoutMs: number;
+}
+
+export interface CompletionVerificationConfig {
+  enabled: boolean;
+  requireCommit: boolean;
+  requireCleanWorktree: boolean;
+  command?: CompletionVerificationCommand | undefined;
+}
+
 export interface CompletionProtocol {
   idleTimeoutMs: number;
   maxChecks: number;
   responseTimeoutMs: number;
-  doneMarker: string;
-  continueMarker: string;
 }
 
 export interface FlatArrayTrustedFoldersConfig {
@@ -72,6 +84,7 @@ export interface ArenaConfig {
   repoName?: string | undefined;
   maxContinues: number;
   agentTimeoutMs: number;
+  completionVerification: CompletionVerificationConfig;
   providers: Record<string, ProviderConfig>;
   variants: VariantConfig[];
 }

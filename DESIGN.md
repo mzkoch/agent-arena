@@ -199,22 +199,105 @@ Output buffering normalizes `\r\n` to `\n` before downstream parsing.
 
 ## Completion Detection Protocol
 
+### Signal Envelope Format
+
+Completion signals use a structured envelope format to prevent false positives from agent reasoning output:
+
+```
+<<<ARENA_SIGNAL:{"status":"done"}>>>
+<<<ARENA_SIGNAL:{"status":"continue"}>>>
+```
+
+The `<<<ARENA_SIGNAL:` prefix is virtually impossible to appear in normal agent output. The JSON payload is validated with Zod.
+
+### Envelope-Only Detection
+
+Signal detection in `src/orchestrator/signal-detector.ts` parses the `<<<ARENA_SIGNAL:...>>>` envelope format from plain text. This is the sole completion signal mechanism — there is no fallback to raw string scanning, which eliminates false-positive completion from marker strings appearing in agent reasoning output.
+
+### Orchestrator → Agent Feedback
+
+When verification fails, the orchestrator sends structured feedback via PTY stdin:
+
+```
+<<<ARENA_COMMAND:{"action":"continue","reason":"No commits ahead of main. Commit your work."}>>>
+```
+
+Followed by a human-readable summary of what failed.
+
+### Per-Provider Completion Protocol
+
 Each provider owns a `completionProtocol`:
 
 - `idleTimeoutMs`
 - `responseTimeoutMs`
 - `maxChecks`
-- `doneMarker`
-- `continueMarker`
 
 Flow:
 
 1. Agent starts in `running`
 2. If no output arrives within `idleTimeoutMs`, the orchestrator marks it `idle`
 3. The orchestrator writes a status-check prompt into the PTY
-4. If output contains `doneMarker`, the agent becomes `completed`
-5. If output contains `continueMarker`, the agent returns to `running`
+4. If output contains a done envelope signal, verification begins (see below)
+5. If output contains a continue envelope signal, the agent returns to `running`
 6. If the agent never responds and `maxChecks` is reached, it is treated as completed
+
+## Completion Verification
+
+### Configuration
+
+Verification is configured at the `ArenaConfig` level (not per-provider) as a policy decision about the arena:
+
+```typescript
+interface CompletionVerificationConfig {
+  enabled: boolean;           // default: true
+  requireCommit: boolean;     // default: true — agent must have commits ahead of base
+  requireCleanWorktree: boolean; // default: true — no uncommitted changes
+  command?: {                 // optional validation command
+    command: string;
+    args: string[];
+    timeoutMs: number;        // default: 300_000
+  };
+}
+```
+
+### Verification Flow
+
+When `completionVerification.enabled` is `true` and a done signal is detected:
+
+1. Agent enters `'verifying'` status (non-terminal, shown in TUI)
+2. Orchestrator runs `verifyWorkspaceCompletion()` against the agent's worktree
+3. **If passed**: agent is marked `completed` with reason `'verified'`, exit command is sent
+4. **If failed**: structured feedback is sent to the agent via PTY stdin, agent returns to `'running'`, timers are re-armed
+5. **If agent exits during verification with non-zero code**: agent is failed
+6. **If agent exits with code 0 before verification accepts**: agent is failed (`'unverified_exit'`)
+
+When `completionVerification.enabled` is `false`, done signals trigger immediate completion (identical to the pre-verification behavior).
+
+### Agent Status Lifecycle
+
+```
+pending → running ⇄ idle → completed | failed | killed
+              ↓                ↑
+          verifying ───────────┘ (failed verification → running)
+              │
+              └──→ completed (passed verification)
+```
+
+`AgentStatus`: `'pending' | 'running' | 'idle' | 'verifying' | 'completed' | 'failed' | 'killed'`
+
+### Verification Checks
+
+`verifyWorkspaceCompletion()` in `src/orchestrator/verification.ts` runs these checks in order:
+
+1. **Commit count**: Resolves the base ref and counts commits ahead of it. Zero commits = failure.
+2. **Clean worktree**: Runs `git status --porcelain` to detect uncommitted changes.
+3. **Validation command**: Optionally runs a user-specified command (e.g., `npm test`) with timeout support.
+
+All issues are collected and reported together, so the agent can address them all at once.
+
+### CommandRunner Timeout Support
+
+`CommandOptions.timeoutMs` enables process timeout for validation commands. When a command exceeds its timeout, the process is killed with SIGTERM and `CommandResult.timedOut` is set to `true`.
 
 ## IPC Protocol
 

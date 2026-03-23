@@ -80,6 +80,46 @@ Requirements live at `.arena/<name>/requirements.md`.
 
 Custom providers can be added in the `providers` field of arena.json.
 
+### Completion Protocol
+
+Agents signal completion using the envelope format:
+
+```
+<<<ARENA_SIGNAL:{"status":"done"}>>>    # Agent is done
+<<<ARENA_SIGNAL:{"status":"continue"}>>>  # Agent is still working
+```
+
+The orchestrator detects these envelopes in agent output. When an agent goes idle (no output for `idleTimeoutMs`), the orchestrator sends a status check prompt asking the agent to emit a signal. After `maxChecks` unanswered checks, the agent is treated as completed.
+
+Per-provider `completionProtocol` config:
+- `idleTimeoutMs` (default: 30000) — idle threshold before status check
+- `maxChecks` (default: 3) — max unanswered status checks
+- `responseTimeoutMs` (default: 60000) — timeout waiting for status check response
+
+### Completion Verification
+
+Configured at the arena level (not per-provider) via `completionVerification`:
+
+```json
+{
+  "completionVerification": {
+    "enabled": true,
+    "requireCommit": true,
+    "requireCleanWorktree": true,
+    "command": {
+      "command": "npm",
+      "args": ["run", "validate"],
+      "timeoutMs": 300000
+    }
+  }
+}
+```
+
+- `enabled` (default: true) — whether to verify before accepting completion
+- `requireCommit` (default: true) — agent must have commits ahead of base branch
+- `requireCleanWorktree` (default: true) — no uncommitted changes allowed
+- `command` (optional) — custom validation command (e.g., run tests)
+
 ### Arena Layout
 
 ```

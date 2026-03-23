@@ -274,9 +274,7 @@ Custom providers can override built-ins or define new ones:
       "completionProtocol": {
         "idleTimeoutMs": 30000,
         "maxChecks": 3,
-        "responseTimeoutMs": 60000,
-        "doneMarker": "ARENA_DONE",
-        "continueMarker": "ARENA_CONTINUING"
+        "responseTimeoutMs": 60000
       },
       "trustedFolders": {
         "strategy": "flat-array",
@@ -292,6 +290,38 @@ The `trustedFolders` field is optional. When set, the arena pre-registers each w
 
 - `flat-array`: folder path is appended to a JSON array (e.g. copilot-cli)
 - `nested-object`: folder path becomes a key in a nested object with a boolean flag (e.g. claude-code). Requires an additional `nestedKey` field.
+
+### Completion Protocol
+
+Agents signal completion using the structured envelope format:
+
+```
+<<<ARENA_SIGNAL:{"status":"done"}>>>      # Agent is done
+<<<ARENA_SIGNAL:{"status":"continue"}>>>   # Agent is still working
+```
+
+The orchestrator detects these envelopes in agent terminal output. When an agent goes idle, the orchestrator sends a status check prompt. Per-provider `completionProtocol` settings control idle detection timing and retry limits.
+
+### Completion Verification
+
+Arena verifies agent work before accepting completion. Configured at the top level of `arena.json`:
+
+```json
+{
+  "completionVerification": {
+    "enabled": true,
+    "requireCommit": true,
+    "requireCleanWorktree": true,
+    "command": {
+      "command": "npm",
+      "args": ["run", "validate"],
+      "timeoutMs": 300000
+    }
+  }
+}
+```
+
+When an agent signals done, the orchestrator checks that commits exist, the worktree is clean, and an optional validation command passes. If verification fails, specific feedback is sent back to the agent, which resumes work.
 
 ### Model Validation
 

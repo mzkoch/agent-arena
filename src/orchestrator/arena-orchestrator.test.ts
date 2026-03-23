@@ -6,6 +6,8 @@ import type { ArenaConfig, Logger, VariantWorkspace } from '../domain/types';
 import { ArenaOrchestrator, formatLaunchError } from './arena-orchestrator';
 import type { PtyFactory, PtyProcess } from './pty';
 import { saveModelCache } from '../providers/model-cache';
+import type { GitRepositoryManager } from '../git/repository';
+import type { CommandRunner } from '../git/command-runner';
 
 class FakePty implements PtyProcess {
   public readonly writes: string[] = [];
@@ -48,6 +50,18 @@ class FakePty implements PtyProcess {
   }
 }
 
+const createMockGitManager = (overrides: {
+  resolveBaseRef?: () => Promise<string>;
+  getCommitCountSinceRef?: () => Promise<number>;
+} = {}): Pick<GitRepositoryManager, 'resolveBaseRef' | 'getCommitCountSinceRef'> => ({
+  resolveBaseRef: overrides.resolveBaseRef ?? vi.fn(() => Promise.resolve('main')),
+  getCommitCountSinceRef: overrides.getCommitCountSinceRef ?? vi.fn(() => Promise.resolve(3))
+});
+
+const createMockCommandRunner = (): CommandRunner => ({
+  run: vi.fn(() => Promise.resolve({ stdout: '', stderr: '', exitCode: 0, timedOut: false }))
+});
+
 const logger: Logger = {
   debug() {},
   info: vi.fn(),
@@ -59,6 +73,7 @@ const config: ArenaConfig = {
   repoName: 'demo',
   maxContinues: 5,
   agentTimeoutMs: 10_000,
+  completionVerification: { enabled: false, requireCommit: true, requireCleanWorktree: true },
   providers: {
     fake: {
       command: 'fake',
@@ -68,9 +83,7 @@ const config: ArenaConfig = {
       completionProtocol: {
         idleTimeoutMs: 25,
         maxChecks: 2,
-        responseTimeoutMs: 25,
-        doneMarker: 'DONE',
-        continueMarker: 'CONT'
+        responseTimeoutMs: 25
       }
     }
   },
@@ -106,7 +119,7 @@ describe('ArenaOrchestrator', () => {
     await orchestrator.startAll();
     expect(fakePty.writes[0]).toMatch(/Read \.arena\/REQUIREMENTS\.md/);
 
-    fakePty.emitData('working\nDONE\n');
+    fakePty.emitData('working\n<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
     // completeAgent is async — allow the termination promise to resolve
     await vi.waitFor(() => {
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
@@ -130,7 +143,7 @@ describe('ArenaOrchestrator', () => {
     await vi.advanceTimersByTimeAsync(30);
     expect(fakePty.writes.some((write) => write.includes('Status check'))).toBe(true);
 
-    fakePty.emitData('CONT\n');
+    fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
     expect(orchestrator.getSnapshot().agents[0]?.status).toBe('running');
     vi.useRealTimers();
   });
@@ -157,13 +170,13 @@ describe('ArenaOrchestrator', () => {
     });
 
     await orchestrator.startAll();
-    fakePty.emitData('working\nDONE\n');
+    fakePty.emitData('working\n<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
 
     await vi.waitFor(() => {
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
     });
 
-    expect(logPty).toHaveBeenCalledWith('alpha', 'working\nDONE\n');
+    expect(logPty).toHaveBeenCalledWith('alpha', 'working\n<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
     expect(logEvent).toHaveBeenCalledWith('arena.start', {
       variants: ['alpha'],
       maxContinues: 5,
@@ -487,7 +500,7 @@ describe('ArenaOrchestrator', () => {
       await orchestrator.startAll();
 
       // Complete via done marker
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
@@ -509,7 +522,7 @@ describe('ArenaOrchestrator', () => {
 
       await orchestrator.startAll();
 
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
@@ -532,13 +545,13 @@ describe('ArenaOrchestrator', () => {
 
       await orchestrator.startAll();
 
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
 
       // Continue marker after completion must not revert to running
-      fakePty.emitData('CONT\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
       await vi.advanceTimersByTimeAsync(200);
 
       expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
@@ -612,14 +625,14 @@ describe('ArenaOrchestrator', () => {
       await orchestrator.startAll();
 
       // Complete the agent
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
 
       // Bombard with data and timer advances
       fakePty.emitData('extra data\n');
-      fakePty.emitData('CONT\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
       await vi.advanceTimersByTimeAsync(500);
 
       // Find the index of the first 'completed' status
@@ -646,7 +659,7 @@ describe('ArenaOrchestrator', () => {
       await orchestrator.startAll();
 
       // Complete via done marker
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
@@ -671,7 +684,7 @@ describe('ArenaOrchestrator', () => {
       await orchestrator.startAll();
 
       // Complete the agent
-      fakePty.emitData('DONE\n');
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
       await vi.waitFor(() => {
         expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
       });
@@ -794,6 +807,290 @@ describe('ArenaOrchestrator', () => {
       expect(message).toContain('custom-provider');
       expect(message).toContain('not found in PATH');
       expect(message).not.toContain('Is GitHub Copilot');
+    });
+  });
+
+  describe('signal envelope detection', () => {
+    it('completes agent via structured envelope signal', async () => {
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+    });
+
+    it('continues agent via structured envelope signal', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+      // Set to idle first
+      await vi.advanceTimersByTimeAsync(30);
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('idle');
+
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('running');
+      vi.useRealTimers();
+    });
+
+    it('envelope continue signal keeps agent running', async () => {
+      const fakePty = new FakePty();
+      const logEvent = vi.fn();
+      const arenaLogger = {
+        debug() {}, info() {}, warn() {}, error() {},
+        logEvent, logPty() {}, writeSummary() {},
+        close: vi.fn(() => Promise.resolve())
+      };
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        arenaLogger
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"continue"}>>>\n');
+
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('running');
+      expect(logEvent).toHaveBeenCalledWith('agent.idle_response', expect.objectContaining({
+        markerMatched: 'continue'
+      }));
+    });
+  });
+
+  describe('completion verification', () => {
+    const verifyConfig: ArenaConfig = {
+      ...config,
+      completionVerification: {
+        enabled: true,
+        requireCommit: true,
+        requireCleanWorktree: true
+      }
+    };
+
+    it('enters verifying state when verification is enabled and done signal received', async () => {
+      const fakePty = new FakePty();
+      const gitManager = createMockGitManager();
+      const commandRunner = createMockCommandRunner();
+
+      const orchestrator = new ArenaOrchestrator(verifyConfig, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        commandRunner,
+        gitManager
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+
+      // Should transition through verifying → completed
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+      expect(orchestrator.getSnapshot().agents[0]?.completionReason).toBe('verified');
+    });
+
+    it('sends feedback and returns to running when verification fails', async () => {
+      vi.useFakeTimers();
+      const fakePty = new FakePty();
+      const gitManager = createMockGitManager({
+        getCommitCountSinceRef: vi.fn(() => Promise.resolve(0))
+      });
+      const commandRunner = createMockCommandRunner();
+
+      const orchestrator = new ArenaOrchestrator(verifyConfig, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        commandRunner,
+        gitManager
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+
+      // Allow async verification to complete
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('running');
+
+      // Should have sent feedback to the agent
+      const feedbackWrites = fakePty.writes.filter(w => w.includes('ARENA_COMMAND') || w.includes('VERIFICATION FAILED'));
+      expect(feedbackWrites.length).toBeGreaterThan(0);
+      vi.useRealTimers();
+    });
+
+    it('fails agent on non-zero exit during verification', async () => {
+      const fakePty = new FakePty();
+      let resolveVerification: (() => void) | undefined;
+      const gitManager = createMockGitManager({
+        resolveBaseRef: vi.fn(() => new Promise<string>((resolve) => {
+          resolveVerification = () => resolve('main');
+        }))
+      });
+      const commandRunner = createMockCommandRunner();
+
+      const orchestrator = new ArenaOrchestrator(verifyConfig, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        commandRunner,
+        gitManager
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+
+      // Wait for verifying state
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
+      });
+
+      // Agent crashes during verification
+      fakePty.emitExit(1);
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('failed');
+      });
+      expect(orchestrator.getSnapshot().agents[0]?.error).toContain('during verification');
+
+      // Clean up the pending promise
+      resolveVerification?.();
+    });
+
+    it('fails agent on clean exit (code 0) during verification as unverified', async () => {
+      const fakePty = new FakePty();
+      let resolveVerification: (() => void) | undefined;
+      const gitManager = createMockGitManager({
+        resolveBaseRef: vi.fn(() => new Promise<string>((resolve) => {
+          resolveVerification = () => resolve('main');
+        }))
+      });
+      const commandRunner = createMockCommandRunner();
+
+      const orchestrator = new ArenaOrchestrator(verifyConfig, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        commandRunner,
+        gitManager
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
+      });
+
+      // Agent exits cleanly before verification completes
+      fakePty.emitExit(0);
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('failed');
+      });
+      expect(orchestrator.getSnapshot().agents[0]?.error).toContain('unverified exit');
+
+      resolveVerification?.();
+    });
+
+    it('verification disabled behaves identically to original flow', async () => {
+      // The base config has verification disabled
+      const fakePty = new FakePty();
+      const orchestrator = new ArenaOrchestrator(config, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve()
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+      expect(orchestrator.getSnapshot().agents[0]?.completionReason).toBe('done_marker');
+    });
+
+    it('ignores data arriving while in verifying state', async () => {
+      const fakePty = new FakePty();
+      let resolveVerification: (() => void) | undefined;
+      const gitManager = createMockGitManager({
+        resolveBaseRef: vi.fn(() => new Promise<string>((resolve) => {
+          resolveVerification = () => resolve('main');
+        }))
+      });
+      const commandRunner = createMockCommandRunner();
+
+      const orchestrator = new ArenaOrchestrator(verifyConfig, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        commandRunner,
+        gitManager
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
+      });
+
+      // Data during verification should not change state
+      fakePty.emitData('some output\n');
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
+
+      // Another done signal should be ignored
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+      expect(orchestrator.getSnapshot().agents[0]?.status).toBe('verifying');
+
+      resolveVerification?.();
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+    });
+
+    it('logs verification events', async () => {
+      const fakePty = new FakePty();
+      const logEvent = vi.fn();
+      const arenaLogger = {
+        debug() {}, info() {}, warn() {}, error() {},
+        logEvent, logPty() {}, writeSummary() {},
+        close: vi.fn(() => Promise.resolve())
+      };
+      const gitManager = createMockGitManager({
+        getCommitCountSinceRef: vi.fn(() => Promise.resolve(5))
+      });
+      const commandRunner = createMockCommandRunner();
+
+      const orchestrator = new ArenaOrchestrator(verifyConfig, workspaces, '/tmp/project', logger, {
+        ptyFactory: () => fakePty,
+        processTerminator: () => Promise.resolve(),
+        arenaLogger,
+        commandRunner,
+        gitManager
+      });
+
+      await orchestrator.startAll();
+      fakePty.emitData('<<<ARENA_SIGNAL:{"status":"done"}>>>\n');
+
+      await vi.waitFor(() => {
+        expect(orchestrator.getSnapshot().agents[0]?.status).toBe('completed');
+      });
+
+      expect(logEvent).toHaveBeenCalledWith('agent.verification_start', { variant: 'alpha' });
+      expect(logEvent).toHaveBeenCalledWith('agent.verification_passed', expect.objectContaining({
+        variant: 'alpha',
+        baseRef: 'main',
+        commitCount: 5
+      }));
     });
   });
 });

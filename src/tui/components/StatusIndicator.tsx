@@ -6,6 +6,7 @@ const STATUS_META: Record<AgentStatus, { icon: string; color: string }> = {
   pending: { icon: '○', color: 'gray' },
   running: { icon: '●', color: 'green' },
   idle: { icon: '◐', color: 'yellow' },
+  verifying: { icon: '◑', color: 'magenta' },
   completed: { icon: '✓', color: 'cyan' },
   failed: { icon: '✗', color: 'red' },
   killed: { icon: '✗', color: 'red' }

@@ -58,6 +58,7 @@ export const loadArenaConfig = async (
     repoName: parsed.repoName,
     maxContinues: parsed.maxContinues,
     agentTimeoutMs: parsed.agentTimeoutMs,
+    completionVerification: parsed.completionVerification,
     providers: parsed.providers,
     variants: normalizedVariants
   };

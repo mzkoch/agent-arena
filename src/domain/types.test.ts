@@ -9,7 +9,7 @@ describe('isTerminalStatus', () => {
     }
   );
 
-  it.each(['pending', 'running', 'idle'] as const)(
+  it.each(['pending', 'running', 'idle', 'verifying'] as const)(
     'returns false for non-terminal status "%s"',
     (status) => {
       expect(isTerminalStatus(status)).toBe(false);

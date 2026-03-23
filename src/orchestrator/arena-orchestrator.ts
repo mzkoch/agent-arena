@@ -22,6 +22,12 @@ import { terminateProcessTree } from '../utils/process';
 import type { PtyFactory, PtyProcess } from './pty';
 import { nodePtyFactory } from './pty';
 import type { ArenaLogger } from '../logging/types';
+import { detectSignal } from './signal-detector';
+import { formatCommandEnvelope } from './signal-protocol';
+import { verifyWorkspaceCompletion, type VerificationGitOps } from './verification';
+import type { CommandRunner } from '../git/command-runner';
+import { NodeCommandRunner } from '../git/command-runner';
+import { GitRepositoryManager } from '../git/repository';
 
 /** Threshold in milliseconds for detecting early failures (likely bad model). */
 const EARLY_FAILURE_THRESHOLD_MS = 15_000;
@@ -69,6 +75,10 @@ interface OrchestratorDependencies {
   arenaLogger?: ArenaLogger;
   /** Custom command executor for model discovery (used in tests). */
   commandExecutor?: CommandExecutor;
+  /** Command runner for verification commands (defaults to NodeCommandRunner). */
+  commandRunner?: CommandRunner;
+  /** Git repository manager for verification (defaults to new instance using commandRunner). */
+  gitManager?: VerificationGitOps;
 }
 
 export class ArenaOrchestrator extends EventEmitter<{
@@ -318,23 +328,18 @@ export class ArenaOrchestrator extends EventEmitter<{
   private handleData(agentName: string, chunk: string): void {
     const agent = this.getAgent(agentName);
     this.dependencies.arenaLogger?.logPty(agentName, chunk);
-    if (isTerminalStatus(agent.status)) {
+    if (isTerminalStatus(agent.status) || agent.status === 'verifying') {
       return;
     }
 
-    // Marker detection from plain text — synchronous, independent of xterm
-    const provider = this.registry.get(agent.workspace.variant.provider);
+    // Signal detection from plain text — synchronous, independent of xterm
     const plainChunk = stripAnsi(chunk);
-    const markerMatched = plainChunk.includes(provider.completionProtocol.doneMarker)
-      ? 'done'
-      : plainChunk.includes(provider.completionProtocol.continueMarker)
-        ? 'continue'
-        : null;
+    const signal = detectSignal(plainChunk);
 
-    if (markerMatched !== null) {
+    if (signal !== null) {
       this.dependencies.arenaLogger?.logEvent('agent.idle_response', {
         variant: agentName,
-        markerMatched
+        markerMatched: signal
       });
     }
 
@@ -349,12 +354,12 @@ export class ArenaOrchestrator extends EventEmitter<{
       });
     });
 
-    if (markerMatched === 'done') {
-      void this.completeAgent(agentName, 0, 'done_marker');
+    if (signal === 'done') {
+      void this.handleDoneSignal(agentName);
       return;
     }
 
-    if (markerMatched === 'continue') {
+    if (signal === 'continue') {
       agent.checksPerformed = 0;
       if (agent.status !== 'running') {
         this.setStatus(agent, 'running');
@@ -375,7 +380,7 @@ export class ArenaOrchestrator extends EventEmitter<{
 
   private handleIdle(agentName: string): void {
     const agent = this.getAgent(agentName);
-    if (!agent.process || isTerminalStatus(agent.status)) {
+    if (!agent.process || isTerminalStatus(agent.status) || agent.status === 'verifying') {
       return;
     }
 
@@ -385,7 +390,7 @@ export class ArenaOrchestrator extends EventEmitter<{
       checksPerformed: agent.checksPerformed + 1
     });
     this.setStatus(agent, 'idle');
-    agent.process.write(`${buildStatusCheckPrompt(provider.completionProtocol)}\r`);
+    agent.process.write(`${buildStatusCheckPrompt()}\r`);
     agent.responseTimer = setTimeout(() => {
       if (!isTerminalStatus(agent.status)) {
         agent.checksPerformed += 1;
@@ -398,6 +403,109 @@ export class ArenaOrchestrator extends EventEmitter<{
         this.emitState(agent);
       }
     }, provider.completionProtocol.responseTimeoutMs);
+  }
+
+  /**
+   * Handle a done signal from the agent. When verification is enabled, runs
+   * workspace checks before accepting completion. When disabled, completes immediately.
+   */
+  private async handleDoneSignal(agentName: string): Promise<void> {
+    const agent = this.getAgent(agentName);
+    if (isTerminalStatus(agent.status) || agent.status === 'verifying') {
+      return;
+    }
+
+    const verificationConfig = this.config.completionVerification;
+    if (!verificationConfig.enabled) {
+      void this.completeAgent(agentName, 0, 'done_marker');
+      return;
+    }
+
+    // Enter verifying state
+    this.setStatus(agent, 'verifying');
+    this.clearTimers(agent);
+    this.dependencies.arenaLogger?.logEvent('agent.verification_start', { variant: agentName });
+
+    try {
+      const commandRunner = this.getCommandRunner();
+      const gitManager = this.getGitManager();
+      const result = await verifyWorkspaceCompletion(
+        agent.workspace.worktreePath,
+        verificationConfig,
+        gitManager,
+        commandRunner
+      );
+
+      // Agent may have exited or been killed during verification
+      if (isTerminalStatus(agent.status)) {
+        return;
+      }
+
+      if (result.passed) {
+        this.dependencies.arenaLogger?.logEvent('agent.verification_passed', {
+          variant: agentName,
+          baseRef: result.baseRef,
+          commitCount: result.commitCount
+        });
+        // Send exit command before completing (completeAgent kills the process tree)
+        const provider = this.registry.get(agent.workspace.variant.provider);
+        if (agent.process) {
+          agent.process.write(`\r${provider.exitCommand}\r`);
+        }
+        void this.completeAgent(agentName, 0, 'verified');
+      } else {
+        this.dependencies.arenaLogger?.logEvent('agent.verification_failed', {
+          variant: agentName,
+          issues: result.issues,
+          baseRef: result.baseRef,
+          commitCount: result.commitCount
+        });
+        this.sendVerificationFeedback(agent, result.issues);
+        this.setStatus(agent, 'running');
+        this.armTimers(agentName);
+      }
+    } catch (error) {
+      // Verification crashed — log and send back to running
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('Verification error', { agent: agentName, error: message });
+      this.dependencies.arenaLogger?.logEvent('agent.verification_error', {
+        variant: agentName,
+        error: message
+      });
+      if (!isTerminalStatus(agent.status)) {
+        this.sendVerificationFeedback(agent, [`Verification error: ${message}`]);
+        this.setStatus(agent, 'running');
+        this.armTimers(agentName);
+      }
+    }
+  }
+
+  /**
+   * Send structured feedback to the agent when verification fails.
+   */
+  private sendVerificationFeedback(agent: ManagedAgent, issues: string[]): void {
+    if (!agent.process) return;
+
+    const reason = issues.join(' ');
+    const commandEnvelope = formatCommandEnvelope({ action: 'continue', reason });
+    const humanReadable = [
+      '',
+      '--- ARENA VERIFICATION FAILED ---',
+      ...issues.map((issue) => `  • ${issue}`),
+      'Please fix the issues above and signal completion again.',
+      '---',
+      ''
+    ].join('\n');
+
+    agent.process.write(`\r${commandEnvelope}\r${humanReadable}\r`);
+  }
+
+  private getCommandRunner(): CommandRunner {
+    return this.dependencies.commandRunner ?? new NodeCommandRunner();
+  }
+
+  private getGitManager(): VerificationGitOps {
+    return this.dependencies.gitManager ?? new GitRepositoryManager(this.getCommandRunner(), this.logger);
   }
 
   private handleExit(agentName: string, exitCode: number, signal?: number): void {
@@ -415,6 +523,18 @@ export class ArenaOrchestrator extends EventEmitter<{
     if (agent.killedByUser) {
       agent.completedAt = this.now();
       this.setStatus(agent, 'killed');
+      return;
+    }
+
+    // If agent exits during verification
+    if (agent.status === 'verifying') {
+      if (exitCode === 0) {
+        // Agent exited cleanly before verification accepted — fail as unverified
+        void this.failAgent(agentName, 'Agent exited before verification completed (unverified exit).', exitCode, 'unverified_exit');
+      } else {
+        // Non-zero exit during verification — fail
+        void this.failAgent(agentName, `Agent exited with code ${exitCode} during verification.`, exitCode);
+      }
       return;
     }
 

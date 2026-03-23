@@ -4,7 +4,6 @@ import type { ArenaConfig, ArenaPaths, ArenaSessionFile, Logger, VariantWorkspac
 import { findGitRoot, resolveArenaPaths, resolveArenaName, loadArenaConfig, listArenaNames } from '../config/load';
 import { readTextFile } from '../utils/files';
 import { buildArenaInstructions } from '../prompt/builder';
-import { ProviderRegistry } from '../providers/registry';
 import { NodeCommandRunner } from '../git/command-runner';
 import { GitRepositoryManager, buildVariantWorkspaces } from '../git/repository';
 import { ArenaProject } from '../project/arena-project';
@@ -138,20 +137,17 @@ export const createArena = async (
 export const setupWorkspacesForLaunch = async (
   context: ArenaRuntimeContext
 ): Promise<void> => {
-  const { config, paths, workspaces, requirementsContent, repository } = context;
-  const registry = new ProviderRegistry(config.providers);
-
+  const { paths, workspaces, requirementsContent, repository } = context;
   for (const workspace of workspaces) {
     await repository.createWorktree(
       paths.gitRoot,
       workspace.variant.branch,
       workspace.worktreePath
     );
-    const provider = registry.get(workspace.variant.provider);
     await repository.writeVariantFiles(
       workspace,
       requirementsContent,
-      buildArenaInstructions(workspace.variant, provider.completionProtocol)
+      buildArenaInstructions(workspace.variant)
     );
     await repository.ensureWorktreeGitignore(workspace.worktreePath);
   }
@@ -317,18 +313,16 @@ export const initializeArena = async (
   const workspaces = project.workspaces;
   const requirementsContent = await project.readRequirements();
 
-  const registry = new ProviderRegistry(config.providers);
   for (const workspace of workspaces) {
     await repository.createWorktree(
       gitRoot,
       workspace.variant.branch,
       workspace.worktreePath
     );
-    const provider = registry.get(workspace.variant.provider);
     await repository.writeVariantFiles(
       workspace,
       requirementsContent,
-      buildArenaInstructions(workspace.variant, provider.completionProtocol)
+      buildArenaInstructions(workspace.variant)
     );
     await repository.ensureWorktreeGitignore(workspace.worktreePath);
   }

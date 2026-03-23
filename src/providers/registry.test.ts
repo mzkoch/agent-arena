@@ -26,9 +26,7 @@ const baseProvider: ProviderConfig = {
   completionProtocol: {
     idleTimeoutMs: 1,
     maxChecks: 1,
-    responseTimeoutMs: 1,
-    doneMarker: 'DONE',
-    continueMarker: 'CONT'
+    responseTimeoutMs: 1
   }
 };
 

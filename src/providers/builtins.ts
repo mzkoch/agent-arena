@@ -3,9 +3,7 @@ import type { ProviderConfig } from '../domain/types';
 export const DEFAULT_COMPLETION_PROTOCOL = {
   idleTimeoutMs: 30_000,
   maxChecks: 3,
-  responseTimeoutMs: 60_000,
-  doneMarker: 'ARENA_DONE',
-  continueMarker: 'ARENA_CONTINUING'
+  responseTimeoutMs: 60_000
 } as const;
 
 const MODEL_DISCOVERY_PROMPT =

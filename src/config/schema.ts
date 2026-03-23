@@ -3,17 +3,13 @@ import { z } from 'zod';
 const defaultCompletionProtocol = {
   idleTimeoutMs: 30_000,
   maxChecks: 3,
-  responseTimeoutMs: 60_000,
-  doneMarker: 'ARENA_DONE',
-  continueMarker: 'ARENA_CONTINUING'
+  responseTimeoutMs: 60_000
 } as const;
 
 const completionProtocolSchema = z.object({
   idleTimeoutMs: z.number().int().positive().default(30_000),
   maxChecks: z.number().int().positive().default(3),
-  responseTimeoutMs: z.number().int().positive().default(60_000),
-  doneMarker: z.string().min(1).default('ARENA_DONE'),
-  continueMarker: z.string().min(1).default('ARENA_CONTINUING')
+  responseTimeoutMs: z.number().int().positive().default(60_000)
 });
 
 const flatArrayTrustedFoldersSchema = z.object({
@@ -73,11 +69,31 @@ export const variantConfigSchema = z.object({
   branch: z.string().min(1).optional()
 });
 
+const completionVerificationCommandSchema = z.object({
+  command: z.string().min(1),
+  args: z.array(z.string()),
+  timeoutMs: z.number().int().positive().default(300_000)
+});
+
+const completionVerificationSchema = z.object({
+  enabled: z.boolean().default(true),
+  requireCommit: z.boolean().default(true),
+  requireCleanWorktree: z.boolean().default(true),
+  command: completionVerificationCommandSchema.optional()
+});
+
+const defaultCompletionVerification = {
+  enabled: true,
+  requireCommit: true,
+  requireCleanWorktree: true
+} as const;
+
 export const arenaConfigSchema = z
   .object({
     repoName: z.string().min(1).optional(),
     maxContinues: z.number().int().positive().default(50),
     agentTimeoutMs: z.number().int().positive().default(3_600_000),
+    completionVerification: completionVerificationSchema.default(defaultCompletionVerification),
     providers: z.record(z.string(), providerConfigSchema).default({}),
     variants: z.array(variantConfigSchema).min(1, 'At least one variant is required.')
   })

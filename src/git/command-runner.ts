@@ -4,11 +4,13 @@ export interface CommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  timedOut: boolean;
 }
 
 export interface CommandOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
 }
 
 export interface CommandRunner {
@@ -30,6 +32,15 @@ export class NodeCommandRunner implements CommandRunner {
 
       let stdout = '';
       let stderr = '';
+      let timedOut = false;
+      let timer: NodeJS.Timeout | undefined;
+
+      if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
+        timer = setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGTERM');
+        }, options.timeoutMs);
+      }
 
       child.stdout.on('data', (chunk: Buffer | string) => {
         stdout += chunk.toString();
@@ -37,12 +48,17 @@ export class NodeCommandRunner implements CommandRunner {
       child.stderr.on('data', (chunk: Buffer | string) => {
         stderr += chunk.toString();
       });
-      child.on('error', reject);
+      child.on('error', (error) => {
+        if (timer) clearTimeout(timer);
+        reject(error);
+      });
       child.on('close', (code) => {
+        if (timer) clearTimeout(timer);
         resolve({
           stdout,
           stderr,
-          exitCode: code ?? 0
+          exitCode: code ?? 0,
+          timedOut
         });
       });
     });

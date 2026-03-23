@@ -11,7 +11,7 @@ const silentLogger = {
 };
 
 const createMockRunner = (
-  responses: Array<{ command?: string; args?: string[]; result: CommandResult }>
+  responses: Array<{ command?: string; args?: string[]; result: Omit<CommandResult, 'timedOut'> & { timedOut?: boolean } }>
 ): CommandRunner => {
   let callIndex = 0;
   return {
@@ -20,7 +20,7 @@ const createMockRunner = (
         throw new Error(`Unexpected call #${callIndex}: ${_command} ${_args.join(' ')}`);
       }
       const response = responses[callIndex++]!;
-      return Promise.resolve(response.result);
+      return Promise.resolve({ timedOut: false, ...response.result });
     })
   };
 };
