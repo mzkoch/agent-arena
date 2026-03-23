@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput, type Key } from 'ink';
 import type { ArenaSnapshot } from '../domain/types';
 import type { ArenaController } from './controller';
 import { Dashboard } from './components/Dashboard';
@@ -8,7 +8,7 @@ import { applyServerMessage, detectVersionGap, hasActiveAgents } from './state';
 
 type ViewMode = 'dashboard' | 'detail';
 
-const toPtyInput = (input: string, key: { [key: string]: boolean | undefined }): string => {
+const toPtyInput = (input: string, key: Key): string => {
   if (key.ctrl) {
     const code = input.toLowerCase().charCodeAt(0);
     // Map Ctrl+A through Ctrl+Z to ASCII control characters 0x01–0x1A
