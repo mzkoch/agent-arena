@@ -145,7 +145,7 @@ export const App = ({ controller, title, onExit }: AppProps): React.JSX.Element 
         return;
       }
 
-      void controller.sendInput(currentAgent.name, toPtyInput(input, key));
+      void controller.sendInput(currentAgent.name, toPtyInput(input, key as { [key: string]: boolean | undefined }));
       return;
     }
 
